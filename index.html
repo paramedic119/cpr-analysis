@@ -878,7 +878,7 @@
       try {
         poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
           baseOptions: {
-            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task",
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
             delegate: "GPU"
           },
           runningMode: mode,
@@ -888,7 +888,7 @@
         console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
         poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
           baseOptions: {
-            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task",
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
             delegate: "CPU"
           },
           runningMode: mode,
