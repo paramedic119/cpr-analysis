@@ -1271,12 +1271,24 @@
       const duration = analysis.duration;
       const totalFrames = Math.floor(duration * outFps);
 
-      // MediaRecorder setup
+      // MediaRecorder setup - try MP4 variants for iOS Safari compatibility
       const stream = canvas.captureStream(outFps);
-      const mimeType = MediaRecorder.isTypeSupported("video/mp4") ? "video/mp4"
-        : MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9"
-          : "video/webm";
-      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
+      const mimeTypes = [
+        'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+        'video/mp4;codecs=avc1',
+        'video/mp4',
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm'
+      ];
+      let mimeType = '';
+      for (const mt of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mt)) { mimeType = mt; break; }
+      }
+      if (!mimeType) mimeType = ''; // let browser choose default
+      const recorderOpts = { videoBitsPerSecond: 2500000 };
+      if (mimeType) recorderOpts.mimeType = mimeType;
+      const recorder = new MediaRecorder(stream, recorderOpts);
       const chunks = [];
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
 
@@ -1411,10 +1423,12 @@
       await recorderReady;
 
       // Create downloadable blob
-      const blob = new Blob(chunks, { type: mimeType });
+      const actualType = mimeType || recorder.mimeType || "video/mp4";
+      const blob = new Blob(chunks, { type: actualType });
       const url = URL.createObjectURL(blob);
       downloadAnchor.href = url;
-      downloadAnchor.download = `cpr_analysis.${mimeType.includes("webm") ? "webm" : "mp4"}`;
+      const ext = actualType.includes("webm") ? "webm" : "mp4";
+      downloadAnchor.download = `cpr_analysis.${ext}`;
       downloadLink.style.display = "block";
       genProgressLabel.textContent = "動画生成完了！";
       genProgressPct.textContent = "100%";
