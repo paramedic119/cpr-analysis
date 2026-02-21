@@ -634,7 +634,7 @@
     <!-- Mode Tabs -->
     <div class="mode-tabs">
       <button class="mode-tab active" id="tab-realtime" data-mode="realtime">📹 リアルタイム</button>
-      <button class="mode-tab" id="tab-upload" data-mode="upload">📂 動画解析</button>
+      <button class="mode-tab" id="tab-upload" data-mode="upload">動画解析</button>
     </div>
 
     <!-- ===== REALTIME MODE ===== -->
@@ -1267,12 +1267,12 @@
       canvas.width = vw;
       canvas.height = vh;
 
-      const outFps = 15;
+      const outFps = 30; // 30fps for smoother, consistent video
       const duration = analysis.duration;
       const totalFrames = Math.floor(duration * outFps);
 
       // MediaRecorder setup - try MP4 variants for iOS Safari compatibility
-      const stream = canvas.captureStream(outFps);
+      const stream = canvas.captureStream(0); // Capture only on draw
       const mimeTypes = [
         'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
         'video/mp4;codecs=avc1',
@@ -1286,7 +1286,7 @@
         if (MediaRecorder.isTypeSupported(mt)) { mimeType = mt; break; }
       }
       if (!mimeType) mimeType = ''; // let browser choose default
-      const recorderOpts = { videoBitsPerSecond: 2500000 };
+      const recorderOpts = { videoBitsPerSecond: 4000000 };
       if (mimeType) recorderOpts.mimeType = mimeType;
       const recorder = new MediaRecorder(stream, recorderOpts);
       const chunks = [];
@@ -1303,7 +1303,7 @@
           const onS = () => { v.removeEventListener("seeked", onS); resolve(); };
           v.addEventListener("seeked", onS);
           v.currentTime = t;
-          setTimeout(() => { v.removeEventListener("seeked", onS); resolve(); }, 500);
+          setTimeout(() => { v.removeEventListener("seeked", onS); resolve(); }, 300);
         });
       }
 
@@ -1312,7 +1312,8 @@
         if (t > duration) break;
 
         await waitSeek(video, t);
-        await new Promise(r => setTimeout(r, 30));
+        // Small delay to ensure frame is rendered
+        await new Promise(r => setTimeout(r, 20));
 
         // Draw video frame
         ctx.drawImage(video, 0, 0, vw, vh);
@@ -1338,46 +1339,44 @@
           }
         }
 
-        // --- Draw telop overlays ---
-        const scale = vw / 640; // scale text relative to 640px base
+        // --- Draw telop overlays (Enlarged for visibility) ---
+        const scale = vw / 640;
 
-        // Status badge (top-left)
-        const badgeH = 36 * scale;
-        const badgeY = 16 * scale;
-        const badgeX = 16 * scale;
+        // Status badge (top-left) - Increased size
+        const badgeH = 50 * scale;
+        const badgeY = 24 * scale;
+        const badgeX = 24 * scale;
         ctx.save();
         if (status === "interrupting") {
-          // Red badge
-          ctx.fillStyle = "rgba(255, 23, 68, 0.85)";
-          const badgeW = 200 * scale;
-          roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 18 * scale);
+          ctx.fillStyle = "rgba(255, 23, 68, 0.9)";
+          const badgeW = 280 * scale;
+          roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 25 * scale);
           ctx.fill();
           ctx.fillStyle = "#fff";
-          ctx.font = `bold ${18 * scale}px Inter, sans-serif`;
+          ctx.font = `bold ${26 * scale}px Inter, sans-serif`;
           ctx.textBaseline = "middle";
-          ctx.fillText(`⛔ 中断中 ${intDuration.toFixed(1)}秒`, badgeX + 12 * scale, badgeY + badgeH / 2);
+          ctx.fillText(`⛔ 中断中 ${intDuration.toFixed(1)}秒`, badgeX + 18 * scale, badgeY + badgeH / 2);
         } else {
-          // Green badge
-          ctx.fillStyle = "rgba(0, 230, 118, 0.85)";
-          const badgeW = 150 * scale;
-          roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 18 * scale);
+          ctx.fillStyle = "rgba(0, 230, 118, 0.9)";
+          const badgeW = 180 * scale;
+          roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 25 * scale);
           ctx.fill();
           ctx.fillStyle = "#0a0e17";
-          ctx.font = `bold ${18 * scale}px Inter, sans-serif`;
+          ctx.font = `bold ${26 * scale}px Inter, sans-serif`;
           ctx.textBaseline = "middle";
-          ctx.fillText("✅ 圧迫中", badgeX + 12 * scale, badgeY + badgeH / 2);
+          ctx.fillText("✅ 圧迫中", badgeX + 18 * scale, badgeY + badgeH / 2);
         }
         ctx.restore();
 
-        // Big interruption timer (center)
-        if (status === "interrupting" && intDuration >= 2) {
+        // Big interruption timer (center) - Increased size
+        if (status === "interrupting" && intDuration >= 1) {
           ctx.save();
-          ctx.fillStyle = intDuration >= 10 ? "rgba(255, 23, 68, 0.9)" : "rgba(255, 255, 255, 0.9)";
-          ctx.font = `900 ${72 * scale}px Inter, sans-serif`;
+          ctx.fillStyle = intDuration >= 10 ? "rgba(255, 23, 68, 1.0)" : "rgba(255, 255, 255, 1.0)";
+          ctx.font = `900 ${120 * scale}px Inter, sans-serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.shadowColor = "rgba(0,0,0,0.7)";
-          ctx.shadowBlur = 10 * scale;
+          ctx.shadowColor = "rgba(0,0,0,0.8)";
+          ctx.shadowBlur = 15 * scale;
           ctx.fillText(intDuration.toFixed(1), vw / 2, vh / 2);
           ctx.restore();
         }
@@ -1385,29 +1384,32 @@
         // Warning border
         if (status === "interrupting" && intDuration >= 10) {
           ctx.save();
-          ctx.strokeStyle = "rgba(255, 23, 68, 0.8)";
-          ctx.lineWidth = 6 * scale;
-          ctx.strokeRect(3 * scale, 3 * scale, vw - 6 * scale, vh - 6 * scale);
+          ctx.strokeStyle = "rgba(255, 23, 68, 0.9)";
+          ctx.lineWidth = 10 * scale;
+          ctx.strokeRect(5 * scale, 5 * scale, vw - 10 * scale, vh - 10 * scale);
           ctx.restore();
         }
 
-        // Bottom stats bar
-        const barH = 40 * scale;
+        // Bottom stats bar - Increased height & text
+        const barH = 54 * scale;
         ctx.save();
-        ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+        ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
         ctx.fillRect(0, vh - barH, vw, barH);
         ctx.fillStyle = "#fff";
-        ctx.font = `bold ${14 * scale}px Inter, sans-serif`;
+        ctx.font = `bold ${18 * scale}px Inter, sans-serif`;
         ctx.textBaseline = "middle";
         const barMid = vh - barH / 2;
         const min = String(Math.floor(t / 60)).padStart(2, "0");
         const sec = String(Math.floor(t % 60)).padStart(2, "0");
-        ctx.fillText(`⬩ ${min}:${sec}`, 12 * scale, barMid);
-        ctx.fillText(`中断: ${intCount}回`, 120 * scale, barMid);
-        ctx.fillText(`合計: ${totalIntSoFar.toFixed(1)}s`, 260 * scale, barMid);
+        ctx.fillText(`⬩ ${min}:${sec}`, 16 * scale, barMid);
+        ctx.fillText(`中断: ${intCount}回`, 140 * scale, barMid);
+        ctx.fillText(`合計: ${totalIntSoFar.toFixed(1)}s`, 280 * scale, barMid);
         const ccf = t > 0 ? Math.round(Math.max(0, (t - totalIntSoFar) / t * 100)) : 100;
-        ctx.fillText(`CCF: ${ccf}%`, 420 * scale, barMid);
+        ctx.fillText(`CCF: ${ccf}%`, 440 * scale, barMid);
         ctx.restore();
+
+        // Push frame to stream
+        stream.getTracks()[0].requestFrame();
 
         // Progress
         const pct = Math.round((i / totalFrames) * 100);
@@ -1415,8 +1417,8 @@
         genProgressFill.style.width = pct + "%";
         genProgressLabel.textContent = `動画生成中… ${t.toFixed(1)}s / ${duration.toFixed(1)}s`;
 
-        // Let recorder capture frame & yield to UI
-        await new Promise(r => setTimeout(r, 1000 / outFps));
+        // Wait to allow recorder to process (1000/30 = 33ms)
+        await new Promise(r => setTimeout(r, 10));
       }
 
       recorder.stop();
