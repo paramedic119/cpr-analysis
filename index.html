@@ -901,62 +901,64 @@
     </div>
   </div>
 
-  // ========== Shared ==========
-  let currentModelType = "lite";
-  const TRACK_INDEX = 12; // RIGHT_SHOULDER
+  <script>
+    // ========== Shared ==========
+    let currentModelType = "lite";
+    const TRACK_INDEX = 12; // RIGHT_SHOULDER
 
-  // Worker initialization
-  const worker = new Worker("worker.js", { type: "module" });
-  let workerInitResolver = null;
-  let upWorkerFrameResolver = null;
-  let upFrameStatus = null; // { wy, timestamp }
+    // Worker initialization
+    const worker = new Worker("worker.js", { type: "module" });
+    let workerInitResolver = null;
+    let upWorkerFrameResolver = null;
+    let upFrameStatus = null; // { wy, timestamp }
 
-  worker.onmessage = (e) => {
-  const { type, payload, message } = e.data;
-  if (type === "progress") {
-  const rtText = document.getElementById("rt-loading-text");
-  const upLabel = document.getElementById("up-progress-label");
-  if (rtText) rtText.textContent = message;
-  if (upLabel) upLabel.textContent = message;
-  } else if (type === "init_done") {
-  if (workerInitResolver) workerInitResolver();
-  } else if (type === "detect_result") {
-  const { wy, timestamp, frameId } = payload;
-  if (frameId === "rt") {
-  rtProcess(wy, performance.now());
-  } else if (frameId === "up") {
-  upFrameStatus = { wy, timestamp };
-  if (upWorkerFrameResolver) {
-  upWorkerFrameResolver();
-  upWorkerFrameResolver = null;
-  }
-  }
-  } else if (type === "error") {
-  console.error("Worker Error:", message);
-  alert("AIエラー: " + message);
-  }
-  };
+    worker.onmessage = (e) => {
+      const { type, payload, message } = e.data;
+      if (type === "progress") {
+        const rtText = document.getElementById("rt-loading-text");
+        const upLabel = document.getElementById("up-progress-label");
+        if (rtText) rtText.textContent = message;
+        if (upLabel) upLabel.textContent = message;
+      } else if (type === "init_done") {
+        if (workerInitResolver) workerInitResolver();
+      } else if (type === "detect_result") {
+        const { wy, timestamp, frameId } = payload;
+        if (frameId === "rt") {
+          rtProcess(wy, performance.now());
+        } else if (frameId === "up") {
+          upFrameStatus = { wy, timestamp };
+          if (upWorkerFrameResolver) {
+            upWorkerFrameResolver();
+            upWorkerFrameResolver = null;
+          }
+        }
+      } else if (type === "error") {
+        console.error("Worker Error:", message);
+        alert("AIエラー: " + message);
+      }
+    };
 
-  async function initMediaPipe(mode, modelType = "lite") {
-  currentModelType = modelType;
-  return new Promise((resolve) => {
-  workerInitResolver = resolve;
-  worker.postMessage({ type: "init", payload: { mode, modelType } });
-  });
-  }
-
-  // Detect rhythmic oscillation (CPR = 100-120/min = ~2Hz)
-  function detectCPR(yArray) {
-  if (yArray.length < 10) return false; const minY=Math.min(...yArray); const maxY=Math.max(...yArray); const
-    amplitude=maxY - minY; if (amplitude < 0.02) return false; let directionChanges=0; let prevDir=0; for (let i=1; i <
-    yArray.length; i++) { const diff=yArray[i] - yArray[i - 1]; if (Math.abs(diff) < 0.002) continue; const dir=diff> 0
-    ? 1 : -1;
-    if (prevDir !== 0 && dir !== prevDir) {
-    directionChanges++;
+    async function initMediaPipe(mode, modelType = "lite") {
+      currentModelType = modelType;
+      return new Promise((resolve) => {
+        workerInitResolver = resolve;
+        worker.postMessage({ type: "init", payload: { mode, modelType } });
+      });
     }
-    prevDir = dir;
-    }
-    return directionChanges >= 3;
+
+    // Detect rhythmic oscillation (CPR = 100-120/min = ~2Hz)
+    function detectCPR(yArray) {
+      if (yArray.length < 10) return false; const minY = Math.min(...yArray); const maxY = Math.max(...yArray); const
+        amplitude = maxY - minY; if (amplitude < 0.02) return false; let directionChanges = 0; let prevDir = 0; for (let i = 1; i <
+          yArray.length; i++) {
+        const diff = yArray[i] - yArray[i - 1]; if (Math.abs(diff) < 0.002) continue; const dir = diff > 0
+          ? 1 : -1;
+        if (prevDir !== 0 && dir !== prevDir) {
+          directionChanges++;
+        }
+        prevDir = dir;
+      }
+      return directionChanges >= 3;
     }
 
     // ========== Real-time Related ==========
@@ -977,57 +979,57 @@
     let rtAnimId = null;
 
     async function initMediaPipe(mode, modelType = "lite") {
-    const needNewModel = !poseLandmarker || currentModelType !== modelType;
+      const needNewModel = !poseLandmarker || currentModelType !== modelType;
 
-    if (poseLandmarker && !needNewModel) {
-    await poseLandmarker.setOptions({ runningMode: mode });
-    return;
-    }
+      if (poseLandmarker && !needNewModel) {
+        await poseLandmarker.setOptions({ runningMode: mode });
+        return;
+      }
 
-    // 既存のモデルを破棄
-    if (poseLandmarker) {
-    poseLandmarker.close();
-    poseLandmarker = null;
-    }
-    currentModelType = modelType;
-    const modelPath = MODEL_PATHS[modelType];
+      // 既存のモデルを破棄
+      if (poseLandmarker) {
+        poseLandmarker.close();
+        poseLandmarker = null;
+      }
+      currentModelType = modelType;
+      const modelPath = MODEL_PATHS[modelType];
 
-    const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-    );
-    // GPU delegate → CPU fallback (iOS Safari does not support GPU delegate)
-    try {
-    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-    baseOptions: {
-    modelAssetPath: modelPath,
-    delegate: "GPU"
-    },
-    runningMode: mode,
-    numPoses: 1
-    });
-    } catch (gpuErr) {
-    console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
-    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-    baseOptions: {
-    modelAssetPath: modelPath,
-    delegate: "CPU"
-    },
-    runningMode: mode,
-    numPoses: 1
-    });
-    }
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      );
+      // GPU delegate → CPU fallback (iOS Safari does not support GPU delegate)
+      try {
+        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: modelPath,
+            delegate: "GPU"
+          },
+          runningMode: mode,
+          numPoses: 1
+        });
+      } catch (gpuErr) {
+        console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
+        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: modelPath,
+            delegate: "CPU"
+          },
+          runningMode: mode,
+          numPoses: 1
+        });
+      }
     }
 
     // ========== Tab Switching ==========
     const tabs = document.querySelectorAll(".mode-tab");
     const panels = document.querySelectorAll(".mode-panel");
     tabs.forEach(tab => {
-    tab.addEventListener("click", () => {
-    tabs.forEach(t => t.classList.remove("active"));
-    panels.forEach(p => p.classList.remove("active"));
-    tab.classList.add("active");
-    document.getElementById("panel-" + tab.dataset.mode).classList.add("active");
-    });
+      tab.addEventListener("click", () => {
+        tabs.forEach(t => t.classList.remove("active"));
+        panels.forEach(p => p.classList.remove("active"));
+        tab.classList.add("active");
+        document.getElementById("panel-" + tab.dataset.mode).classList.add("active");
+      });
     });
 
     // ========== REALTIME MODE ==========
@@ -1052,114 +1054,119 @@
     const WINDOW = 30; // ~1 second history
 
     async function startCamera() {
-    const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false
-    });
-    cameraVideo.srcObject = stream;
-    await cameraVideo.play();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false
+      });
+      cameraVideo.srcObject = stream;
+      await cameraVideo.play();
     }
 
     let rtLastVidTime = -1;
     let rtFrameTs = 0;
     async function rtLoop() {
-    if (!rtMeasuring) return;
+      if (!rtMeasuring) return;
 
-    // Draw camera and HUD to capture canvas for recording
-    const vw = cameraVideo.videoWidth;
-    const vh = cameraVideo.videoHeight;
-    if (vw > 0) {
-    if (rtCaptureCanvas.width !== vw) {
-    rtCaptureCanvas.width = vw;
-    rtCaptureCanvas.height = vh;
-    }
-    rtCaptureCtx.drawImage(cameraVideo, 0, 0, vw, vh);
+      // Draw camera and HUD to capture canvas for recording
+      const vw = cameraVideo.videoWidth;
+      const vh = cameraVideo.videoHeight;
+      if (vw > 0) {
+        if (rtCaptureCanvas.width !== vw) {
+          rtCaptureCanvas.width = vw;
+          rtCaptureCanvas.height = vh;
+        }
+        rtCaptureCtx.drawImage(cameraVideo, 0, 0, vw, vh);
 
-    const scale = vw / 640;
-    const badgeH = 50 * scale;
-    const badgeY = 24 * scale;
-    const badgeX = 24 * scale;
-    rtCaptureCtx.save();
-    if (rtCompressing) {
-    rtCaptureCtx.fillStyle = "rgba(0, 230, 118, 0.95)";
-    const badgeW = 200 * scale;
-    roundRect(rtCaptureCtx, badgeX, badgeY, badgeW, badgeH, 25 * scale);
-    rtCaptureCtx.fill();
-    rtCaptureCtx.fillStyle = "#0a0e17";
-    rtCaptureCtx.font = `bold ${28 * scale}px Inter, sans-serif`;
-    rtCaptureCtx.textBaseline = "middle";
-    rtCaptureCtx.fillText("✅ 圧迫中", badgeX + 20 * scale, badgeY + badgeH / 2);
-    } else if (rtIntStart !== null) {
-    const d = (performance.now() - rtIntStart) / 1000;
-    rtCaptureCtx.fillStyle = "rgba(255, 23, 68, 0.95)";
-    const badgeW = 320 * scale;
-    roundRect(rtCaptureCtx, badgeX, badgeY, badgeW, badgeH, 25 * scale);
-    rtCaptureCtx.fill();
-    rtCaptureCtx.fillStyle = "#fff";
-    rtCaptureCtx.font = `bold ${28 * scale}px Inter, sans-serif`;
-    rtCaptureCtx.textBaseline = "middle";
-    rtCaptureCtx.fillText(`⛔ 中断中 ${d.toFixed(1)}秒`, badgeX + 20 * scale, badgeY + badgeH / 2);
+        const scale = vw / 640;
+        const badgeH = 50 * scale;
+        const badgeY = 24 * scale;
+        const badgeX = 24 * scale;
+        rtCaptureCtx.save();
+        if (rtCompressing) {
+          rtCaptureCtx.fillStyle = "rgba(0, 230, 118, 0.95)";
+          const badgeW = 200 * scale;
+          roundRect(rtCaptureCtx, badgeX, badgeY, badgeW, badgeH, 25 * scale);
+          rtCaptureCtx.fill();
+          rtCaptureCtx.fillStyle = "#0a0e17";
+          rtCaptureCtx.font = `bold ${28 * scale}px Inter, sans-serif`;
+          rtCaptureCtx.textBaseline = "middle";
+          rtCaptureCtx.fillText("✅ 圧迫中", badgeX + 20 * scale, badgeY + badgeH / 2);
+        } else if (rtIntStart !== null) {
+          const d = (performance.now() - rtIntStart) / 1000;
+          rtCaptureCtx.fillStyle = "rgba(255, 23, 68, 0.95)";
+          const badgeW = 320 * scale;
+          roundRect(rtCaptureCtx, badgeX, badgeY, badgeW, badgeH, 25 * scale);
+          rtCaptureCtx.fill();
+          rtCaptureCtx.fillStyle = "#fff";
+          rtCaptureCtx.font = `bold ${28 * scale}px Inter, sans-serif`;
+          rtCaptureCtx.textBaseline = "middle";
+          rtCaptureCtx.fillText(`⛔ 中断中 ${d.toFixed(1)}秒`, badgeX + 20 * scale, badgeY + badgeH / 2);
 
-    if (d >= 0.5) {
-    rtCaptureCtx.fillStyle = d >= 10 ? "#ff1744" : "#ffffff";
-    rtCaptureCtx.font = `900 ${140 * scale}px Inter, sans-serif`;
-    rtCaptureCtx.textAlign = "center";
-    rtCaptureCtx.shadowColor = "rgba(0,0,0,0.9)";
-    rtCaptureCtx.shadowBlur = 20 * scale;
-    rtCaptureCtx.fillText(d.toFixed(1), vw / 2, vh / 2);
-    }
-    }
-    rtCaptureCtx.restore();
-    }
+          if (d >= 0.5) {
+            rtCaptureCtx.fillStyle = d >= 10 ? "#ff1744" : "#ffffff";
+            rtCaptureCtx.font = `900 ${140 * scale}px Inter, sans-serif`;
+            rtCaptureCtx.textAlign = "center";
+            rtCaptureCtx.shadowColor = "rgba(0,0,0,0.9)";
+            rtCaptureCtx.shadowBlur = 20 * scale;
+            rtCaptureCtx.fillText(d.toFixed(1), vw / 2, vh / 2);
+          }
+        }
+        rtCaptureCtx.restore();
+      }
 
-    if (cameraVideo.readyState >= 2 && cameraVideo.currentTime !== rtLastVidTime) {
-    rtLastVidTime = cameraVideo.currentTime;
-    rtFrameTs += 33.34;
-    try {
-    const bitmap = await createImageBitmap(cameraVideo);
-    worker.postMessage({
-    type: "detect",
-    payload: { imageBitmap: bitmap, timestamp: rtFrameTs, frameId: "rt" }
-    }, [bitmap]);
-    } catch (e) {
-    console.warn("capture error:", e);
-    }
-    }
-    rtAnimId = requestAnimationFrame(rtLoop);
+      if (cameraVideo.readyState >= 2 && cameraVideo.currentTime !== rtLastVidTime) {
+        rtLastVidTime = cameraVideo.currentTime;
+        rtFrameTs += 33.34;
+        try {
+          const bitmap = await createImageBitmap(cameraVideo);
+          worker.postMessage({
+            type: "detect",
+            payload: { imageBitmap: bitmap, timestamp: rtFrameTs, frameId: "rt" }
+          }, [bitmap]);
+        } catch (e) {
+          console.warn("capture error:", e);
+        }
+      }
+      rtAnimId = requestAnimationFrame(rtLoop);
     }
 
     function rtProcess(wy, ts) {
-    if (wy !== null) rtYHistory.push(wy);
-    while (rtYHistory.length > WINDOW * 3) rtYHistory.shift();
-    if (rtYHistory.length < WINDOW) return; const win=rtYHistory.slice(-WINDOW); const comp=detectCPR(win); if
-      (rtCompressing && !comp) { rtIntStart=ts; rtLastStateTime=ts; } else if (!rtCompressing && comp && rtIntStart
-      !==null) { const dur=(ts - rtIntStart) / 1000; if (dur>= 1.0) { rtInterruptions.push({ duration: dur, at:
-      (rtIntStart - rtStartTime) / 1000 }); addLog(rtLog, rtInterruptions.length, dur, (rtIntStart - rtStartTime) /
-      1000); }
-      rtIntStart = null; rtLastStateTime = ts;
+      if (wy !== null) rtYHistory.push(wy);
+      while (rtYHistory.length > WINDOW * 3) rtYHistory.shift();
+      if (rtYHistory.length < WINDOW) return; const win = rtYHistory.slice(-WINDOW); const comp = detectCPR(win); if
+        (rtCompressing && !comp) { rtIntStart = ts; rtLastStateTime = ts; } else if (!rtCompressing && comp && rtIntStart
+          !== null) {
+        const dur = (ts - rtIntStart) / 1000; if (dur >= 1.0) {
+          rtInterruptions.push({
+            duration: dur, at:
+              (rtIntStart - rtStartTime) / 1000
+          }); addLog(rtLog, rtInterruptions.length, dur, (rtIntStart - rtStartTime) /
+            1000);
+        }
+        rtIntStart = null; rtLastStateTime = ts;
       }
       rtCompressing = comp;
       rtUpdateUI(comp, ts);
-      }
+    }
 
 
 
-      function rtUpdateUI(comp, ts) {
+    function rtUpdateUI(comp, ts) {
       const elapsed = ts - rtStartTime;
       // Status
       if (comp) {
-      rtStatusBadge.className = "status-badge compressing"; rtStatusText.textContent = "圧迫中";
-      rtVideoWrapper.className = "video-wrapper compressing";
-      rtIntTimer.classList.remove("visible", "warning"); flashOverlay.classList.remove("active");
+        rtStatusBadge.className = "status-badge compressing"; rtStatusText.textContent = "圧迫中";
+        rtVideoWrapper.className = "video-wrapper compressing";
+        rtIntTimer.classList.remove("visible", "warning"); flashOverlay.classList.remove("active");
       } else if (rtIntStart !== null) {
-      const d = (ts - rtIntStart) / 1000;
-      rtStatusBadge.className = "status-badge interrupting"; rtStatusText.textContent = "中断中";
-      rtVideoWrapper.className = "video-wrapper interrupting";
-      rtIntTimer.textContent = d.toFixed(1); rtIntTimer.classList.add("visible");
-      if (d >= 10) { rtIntTimer.classList.add("warning"); flashOverlay.classList.add("active"); }
+        const d = (ts - rtIntStart) / 1000;
+        rtStatusBadge.className = "status-badge interrupting"; rtStatusText.textContent = "中断中";
+        rtVideoWrapper.className = "video-wrapper interrupting";
+        rtIntTimer.textContent = d.toFixed(1); rtIntTimer.classList.add("visible");
+        if (d >= 10) { rtIntTimer.classList.add("warning"); flashOverlay.classList.add("active"); }
       } else {
-      rtStatusBadge.className = "status-badge idle"; rtStatusText.textContent = "検出待ち";
-      rtVideoWrapper.className = "video-wrapper";
-      rtIntTimer.classList.remove("visible", "warning"); flashOverlay.classList.remove("active");
+        rtStatusBadge.className = "status-badge idle"; rtStatusText.textContent = "検出待ち";
+        rtVideoWrapper.className = "video-wrapper";
+        rtIntTimer.classList.remove("visible", "warning"); flashOverlay.classList.remove("active");
       }
       // Stats
       const finTotal = rtInterruptions.reduce((s, i) => s + i.duration, 0);
@@ -1175,22 +1182,22 @@
       // Elapsed
       const s = Math.floor(elSec);
       rtElapsed.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-      }
+    }
 
-      rtBtnStart.addEventListener("click", async () => {
+    rtBtnStart.addEventListener("click", async () => {
       rtBtnStart.disabled = true;
       // Start camera on first click
       if (!cameraVideo.srcObject) {
-      try {
-      rtLoading.classList.remove("hidden");
-      document.getElementById("rt-loading-text").textContent = "カメラを起動中…";
-      await startCamera();
-      rtLoading.classList.add("hidden");
-      } catch (e) {
-      document.getElementById("rt-loading-text").textContent = "カメラの起動に失敗: " + e.message;
-      rtBtnStart.disabled = false;
-      return;
-      }
+        try {
+          rtLoading.classList.remove("hidden");
+          document.getElementById("rt-loading-text").textContent = "カメラを起動中…";
+          await startCamera();
+          rtLoading.classList.add("hidden");
+        } catch (e) {
+          document.getElementById("rt-loading-text").textContent = "カメラの起動に失敗: " + e.message;
+          rtBtnStart.disabled = false;
+          return;
+        }
       }
       await requestWakeLock();
       rtMeasuring = true; rtStartTime = performance.now(); rtLastStateTime = performance.now();
@@ -1204,29 +1211,34 @@
       rtRecorder = new MediaRecorder(stream, options);
       rtRecorder.ondataavailable = e => { if (e.data.size > 0) rtChunks.push(e.data); };
       rtRecorder.onstop = () => {
-      const blob = new Blob(rtChunks, { type: rtRecorder.mimeType || "video/mp4" });
-      const url = URL.createObjectURL(blob);
-      rtDownloadAnchor.href = url;
-      rtDownloadLink.style.display = "block";
+        const blob = new Blob(rtChunks, { type: rtRecorder.mimeType || "video/mp4" });
+        const url = URL.createObjectURL(blob);
+        rtDownloadAnchor.href = url;
+        rtDownloadLink.style.display = "block";
       };
       rtRecorder.start();
 
       rtBtnStop.disabled = false; rtLoop();
-      });
-      rtBtnStop.addEventListener("click", () => {
+    });
+    rtBtnStop.addEventListener("click", () => {
       rtMeasuring = false; if (rtAnimId) cancelAnimationFrame(rtAnimId);
       if (rtRecorder && rtRecorder.state !== "inactive") rtRecorder.stop();
       releaseWakeLock();
-      if (rtIntStart) { const d = (performance.now() - rtIntStart) / 1000; if (d >= 1) { rtInterruptions.push({
-      duration: d, at: (rtIntStart - rtStartTime) / 1000 }); addLog(rtLog, rtInterruptions.length, d, (rtIntStart -
-      rtStartTime) / 1000); } rtIntStart = null; }
+      if (rtIntStart) {
+        const d = (performance.now() - rtIntStart) / 1000; if (d >= 1) {
+          rtInterruptions.push({
+            duration: d, at: (rtIntStart - rtStartTime) / 1000
+          }); addLog(rtLog, rtInterruptions.length, d, (rtIntStart -
+            rtStartTime) / 1000);
+        } rtIntStart = null;
+      }
       rtBtnStart.disabled = false; rtBtnStop.disabled = true;
       rtUpdateUI(false, performance.now());
       rtStatusBadge.className = "status-badge idle"; rtStatusText.textContent = "停止中";
       rtVideoWrapper.className = "video-wrapper";
       rtIntTimer.classList.remove("visible", "warning"); flashOverlay.classList.remove("active");
-      });
-      rtBtnReset.addEventListener("click", () => {
+    });
+    rtBtnReset.addEventListener("click", () => {
       rtMeasuring = false; if (rtAnimId) cancelAnimationFrame(rtAnimId);
       if (rtRecorder && rtRecorder.state !== "inactive") rtRecorder.stop();
       rtDownloadLink.style.display = "none";
@@ -1241,39 +1253,39 @@
       rtIntTimer.classList.remove("visible", "warning"); flashOverlay.classList.remove("active");
       rtCardTotal.classList.remove("highlight-red");
       rtBtnStart.disabled = false; rtBtnStop.disabled = true;
-      });
+    });
 
-      // ========== UPLOAD MODE ==========
-      const uploadArea = document.getElementById("upload-area");
-      const fileInput = document.getElementById("file-input");
-      const uploadVideo = document.getElementById("upload-video");
-      const upVideoWrapper = document.getElementById("up-video-wrapper");
-      const upStatusBadge = document.getElementById("up-status-badge");
-      const upStatusText = document.getElementById("up-status-text");
-      const upIntTimer = document.getElementById("up-int-timer");
-      const upBtnAnalyze = document.getElementById("up-btn-analyze");
-      const upBtnReset = document.getElementById("up-btn-reset");
-      const upProgress = document.getElementById("up-progress");
-      const upProgressLabel = document.getElementById("up-progress-label");
-      const upProgressPct = document.getElementById("up-progress-pct");
-      const upProgressFill = document.getElementById("up-progress-fill");
-      const upStats = document.getElementById("up-stats");
-      const upLogSection = document.getElementById("up-log-section");
-      const upStatCount = document.getElementById("up-stat-count");
-      const upStatTotal = document.getElementById("up-stat-total");
-      const upStatLongest = document.getElementById("up-stat-longest");
-      const upStatCCF = document.getElementById("up-stat-ccf");
-      const upCardTotal = document.getElementById("up-card-total");
-      const upLog = document.getElementById("up-log");
+    // ========== UPLOAD MODE ==========
+    const uploadArea = document.getElementById("upload-area");
+    const fileInput = document.getElementById("file-input");
+    const uploadVideo = document.getElementById("upload-video");
+    const upVideoWrapper = document.getElementById("up-video-wrapper");
+    const upStatusBadge = document.getElementById("up-status-badge");
+    const upStatusText = document.getElementById("up-status-text");
+    const upIntTimer = document.getElementById("up-int-timer");
+    const upBtnAnalyze = document.getElementById("up-btn-analyze");
+    const upBtnReset = document.getElementById("up-btn-reset");
+    const upProgress = document.getElementById("up-progress");
+    const upProgressLabel = document.getElementById("up-progress-label");
+    const upProgressPct = document.getElementById("up-progress-pct");
+    const upProgressFill = document.getElementById("up-progress-fill");
+    const upStats = document.getElementById("up-stats");
+    const upLogSection = document.getElementById("up-log-section");
+    const upStatCount = document.getElementById("up-stat-count");
+    const upStatTotal = document.getElementById("up-stat-total");
+    const upStatLongest = document.getElementById("up-stat-longest");
+    const upStatCCF = document.getElementById("up-stat-ccf");
+    const upCardTotal = document.getElementById("up-card-total");
+    const upLog = document.getElementById("up-log");
 
-      let upAnalyzing = false;
+    let upAnalyzing = false;
 
-      uploadArea.addEventListener("click", () => fileInput.click());
-      fileInput.addEventListener("change", (e) => {
+    uploadArea.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", (e) => {
       if (e.target.files.length > 0) loadVideo(e.target.files[0]);
-      });
+    });
 
-      function loadVideo(file) {
+    function loadVideo(file) {
       const url = URL.createObjectURL(file);
       uploadVideo.src = url;
       uploadVideo.load();
@@ -1283,20 +1295,20 @@
       // Reset results
       upStats.style.display = "none";
       upLogSection.style.display = "none";
-      }
+    }
 
-      // ========== Model Selector ==========
-      let selectedModelType = "lite";
-      const modelBtns = document.querySelectorAll(".model-btn");
-      modelBtns.forEach(btn => {
+    // ========== Model Selector ==========
+    let selectedModelType = "lite";
+    const modelBtns = document.querySelectorAll(".model-btn");
+    modelBtns.forEach(btn => {
       btn.addEventListener("click", () => {
-      modelBtns.forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      selectedModelType = btn.dataset.model;
+        modelBtns.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        selectedModelType = btn.dataset.model;
       });
-      });
+    });
 
-      upBtnAnalyze.addEventListener("click", async () => {
+    upBtnAnalyze.addEventListener("click", async () => {
       if (upAnalyzing) return;
       upAnalyzing = true;
       await requestWakeLock();
@@ -1313,452 +1325,511 @@
 
       // Fast seek helper using requestVideoFrameCallback
       function fastSeek(videoEl, targetTime) {
-      return new Promise((resolve) => {
-      let resolved = false;
-      const fallbackTimeout = setTimeout(() => {
-      if (!resolved) { resolved = true; resolve(); }
-      }, 300);
+        return new Promise((resolve) => {
+          let resolved = false;
+          const fallbackTimeout = setTimeout(() => {
+            if (!resolved) { resolved = true; resolve(); }
+          }, 300);
 
-      if ('requestVideoFrameCallback' in videoEl) {
-      videoEl.requestVideoFrameCallback(() => {
-      if (!resolved) {
-      clearTimeout(fallbackTimeout);
-      resolved = true;
-      resolve();
-      }
-      });
-      } else {
-      const onSeeked = () => {
-      videoEl.removeEventListener('seeked', onSeeked);
-      if (!resolved) { clearTimeout(fallbackTimeout); resolved = true; resolve(); }
-      };
-      videoEl.addEventListener('seeked', onSeeked);
-      }
-      videoEl.currentTime = targetTime;
-      });
+          if ('requestVideoFrameCallback' in videoEl) {
+            videoEl.requestVideoFrameCallback(() => {
+              if (!resolved) {
+                clearTimeout(fallbackTimeout);
+                resolved = true;
+                resolve();
+              }
+            });
+          } else {
+            const onSeeked = () => {
+              videoEl.removeEventListener('seeked', onSeeked);
+              if (!resolved) { clearTimeout(fallbackTimeout); resolved = true; resolve(); }
+            };
+            videoEl.addEventListener('seeked', onSeeked);
+          }
+          videoEl.currentTime = targetTime;
+        });
       }
 
       const video = uploadVideo;
       // Wait for video metadata to be ready
-      if (video.readyState < 1) { await new Promise(r=> { video.onloadedmetadata = r; setTimeout(r, 2000); });
-        }
-        await fastSeek(video, 0);
+      if (video.readyState < 1) {
+        await new Promise(r => { video.onloadedmetadata = r; setTimeout(r, 2000); });
+      }
+      await fastSeek(video, 0);
 
-        const fps = 10;
-        const duration = video.duration;
-        if (!duration || !isFinite(duration)) {
+      const fps = 10;
+      const duration = video.duration;
+      if (!duration || !isFinite(duration)) {
         upProgressLabel.textContent = "動画の長さを取得できません";
         upAnalyzing = false; upBtnAnalyze.disabled = false;
         releaseWakeLock();
         return;
-        }
-        const totalFrames = Math.floor(duration * fps);
-        const yCoords = [];
-        const timestamps = [];
+      }
+      const totalFrames = Math.floor(duration * fps);
+      const yCoords = [];
+      const timestamps = [];
 
-        upStatusBadge.className = "status-badge analyzing";
-        upStatusText.textContent = "解析中…";
+      upStatusBadge.className = "status-badge analyzing";
+      upStatusText.textContent = "解析中…";
 
-        let monotonicTs = 0;
-        for (let i = 0; i <= totalFrames; i++) { const t=i / fps; if (t> duration) break;
+      let monotonicTs = 0;
+      for (let i = 0; i <= totalFrames; i++) {
+        const t = i / fps; if (t > duration) break;
 
-          await fastSeek(video, t);
-          monotonicTs += 100;
+        await fastSeek(video, t);
+        monotonicTs += 100;
 
-          try {
+        try {
           const bitmap = await createImageBitmap(video);
 
           // Wait for worker result
           const waitWorker = new Promise(resolve => upWorkerFrameResolver = resolve);
           worker.postMessage({
-          type: "detect",
-          payload: { imageBitmap: bitmap, timestamp: monotonicTs, frameId: "up" }
+            type: "detect",
+            payload: { imageBitmap: bitmap, timestamp: monotonicTs, frameId: "up" }
           }, [bitmap]);
 
           await waitWorker;
           yCoords.push(upFrameStatus.wy);
 
-          } catch (e) {
+        } catch (e) {
           console.warn("Frame analysis error:", e);
           yCoords.push(null);
-          }
-          timestamps.push(t);
+        }
+        timestamps.push(t);
 
-          // Progress
-          const pct = Math.round((i / totalFrames) * 100);
-          upProgressPct.textContent = pct + "%";
-          upProgressFill.style.width = pct + "%";
-          upProgressLabel.textContent = `解析中… ${t.toFixed(1)}s / ${duration.toFixed(1)}s`;
+        // Progress
+        const pct = Math.round((i / totalFrames) * 100);
+        upProgressPct.textContent = pct + "%";
+        upProgressFill.style.width = pct + "%";
+        upProgressLabel.textContent = `解析中… ${t.toFixed(1)}s / ${duration.toFixed(1)}s`;
 
-          // Create waveform-like mini animation for progress
-          if (upFrameStatus && upFrameStatus.wy !== null) {
+        // Create waveform-like mini animation for progress
+        if (upFrameStatus && upFrameStatus.wy !== null) {
           const labelSpan = document.getElementById("up-progress-label");
           const h = Math.round((upFrameStatus.wy - 0.2) * 20); // pseudo height
-          const bar = '█'.repeat(Math.max(1, Math.min(5, 5 - h/4)));
+          const bar = '█'.repeat(Math.max(1, Math.min(5, 5 - h / 4)));
           labelSpan.textContent = `解析中… ${t.toFixed(1)}s ` + bar;
+        }
+      }
+
+      // Analyze using rhythmic peak detection
+      const windowSize = Math.max(Math.floor(fps * 1.0), 5); // 1 second window
+      const interruptions = [];
+      let isComp = false, intStartIdx = -1;
+
+      for (let i = 0; i <= yCoords.length - windowSize; i++) {
+        const win = yCoords.slice(i, i + windowSize).filter(v =>
+          v !== null);
+        let comp = false;
+        if (win.length >= windowSize * 0.5) {
+          comp = detectCPR(win);
+        }
+
+        if (isComp && !comp) { intStartIdx = i; }
+        else if (!isComp && comp && intStartIdx >= 0) {
+          const dur = timestamps[i] - timestamps[intStartIdx];
+          if (dur >= 1.0) interruptions.push({ duration: dur, at: timestamps[intStartIdx] });
+          intStartIdx = -1;
+        }
+        isComp = comp;
+      }
+      // trailing interruption
+      if (!isComp && intStartIdx >= 0) {
+        const dur = timestamps[timestamps.length - 1] - timestamps[intStartIdx];
+        if (dur >= 1.0) interruptions.push({ duration: dur, at: timestamps[intStartIdx] });
+      }
+
+      // Display results
+      upLog.innerHTML = "";
+      if (interruptions.length === 0) {
+        upLog.innerHTML = '<li class="log-empty">中断は検出されませんでした 🎉</li>';
+      } else {
+        interruptions.forEach((int, idx) => addLog(upLog, idx + 1, int.duration, int.at));
+      }
+
+      const totalInt = interruptions.reduce((s, i) => s + i.duration, 0);
+      upStatCount.textContent = interruptions.length;
+      upStatTotal.textContent = totalInt.toFixed(1);
+      upStatLongest.textContent = interruptions.length ? Math.max(...interruptions.map(i =>
+        i.duration)).toFixed(1) : "0.0";
+      upStatCCF.textContent = duration > 0 ? Math.round(Math.max(0, (duration - totalInt) / duration * 100)) :
+        "-";
+      if (totalInt > 10) upCardTotal.classList.add("highlight-red"); else
+        upCardTotal.classList.remove("highlight-red");
+
+      upProgressLabel.textContent = "解析完了！";
+      upProgressPct.textContent = "100%";
+      upProgressFill.style.width = "100%";
+      upStatusBadge.className = "status-badge idle";
+      upStatusText.textContent = "完了";
+      upAnalyzing = false;
+
+      // Build per-frame status map for telop generation
+      const frameStatusMap = [];
+      for (let i = 0; i < timestamps.length; i++) {
+        const t = timestamps[i]; // Find if this time falls within any
+              interruption let status = "compressing"; let intDuration = 0; for (const intItem of interruptions) {
+          if (t >=
+            intItem.at && t < intItem.at + intItem.duration) {
+            status = "interrupting"; intDuration = t - intItem.at;
+            break;
           }
-          }
+        } // Before first compression detected, show idle if (i < windowSize) status="detecting" ;
+        frameStatusMap.push({ time: t, status, intDuration });
+      } // Store analysis data for video generation
+      window._cprAnalysis = {
+        interruptions, totalInt, duration, frameStatusMap, ccf: duration > 0 ?
+          Math.round(Math.max(0, (duration - totalInt) / duration * 100)) : 0
+      };
 
-          // Analyze using rhythmic peak detection
-          const windowSize = Math.max(Math.floor(fps * 1.0), 5); // 1 second window
-          const interruptions = [];
-          let isComp = false, intStartIdx = -1;
+      // Show generate button
+      document.getElementById("generate-section").classList.add("active");
+      releaseWakeLock();
+    });
 
-          for (let i = 0; i <= yCoords.length - windowSize; i++) { const win=yCoords.slice(i, i + windowSize).filter(v=>
-            v !== null);
-            let comp = false;
-            if (win.length >= windowSize * 0.5) {
-            comp = detectCPR(win);
-            }
+    upBtnReset.addEventListener("click", () => {
+      upAnalyzing = false;
+      releaseWakeLock();
+      uploadVideo.src = ""; uploadVideo.load();
+      upVideoWrapper.style.display = "none"; uploadArea.style.display = "";
+      upProgress.classList.remove("active"); upProgressFill.style.width = "0%";
+      upStats.style.display = "none"; upLogSection.style.display = "none";
+      upBtnAnalyze.disabled = true;
+      upStatCount.textContent = "0"; upStatTotal.textContent = "0.0"; upStatLongest.textContent = "0.0";
+      upStatCCF.textContent = "-";
+      upLog.innerHTML = '<li class="log-empty">まだ中断は記録されていません</li>';
+      upStatusBadge.className = "status-badge idle"; upStatusText.textContent = "待機中";
+      upCardTotal.classList.remove("highlight-red");
+      fileInput.value = "";
+      // Reset generate section
+      document.getElementById("generate-section").classList.remove("active");
+      document.getElementById("gen-progress").classList.remove("active");
+      document.getElementById("download-link").style.display = "none";
+      const previewWrapper = document.getElementById("preview-wrapper");
+      if (previewWrapper) previewWrapper.style.display = "none";
+      const previewVideo = document.getElementById("preview-video");
+      if (previewVideo) previewVideo.src = "";
+      window._cprAnalysis = null;
+    });
 
-            if (isComp && !comp) { intStartIdx = i; }
-            else if (!isComp && comp && intStartIdx >= 0) {
-            const dur = timestamps[i] - timestamps[intStartIdx];
-            if (dur >= 1.0) interruptions.push({ duration: dur, at: timestamps[intStartIdx] });
-            intStartIdx = -1;
-            }
-            isComp = comp;
-            }
-            // trailing interruption
-            if (!isComp && intStartIdx >= 0) {
-            const dur = timestamps[timestamps.length - 1] - timestamps[intStartIdx];
-            if (dur >= 1.0) interruptions.push({ duration: dur, at: timestamps[intStartIdx] });
-            }
+    // ========== Wake Lock Helper ==========
+    let wakeLock = null;
+    async function requestWakeLock() {
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLock = await navigator.wakeLock.request('screen');
+          console.log("Wake Lock is active");
+        } catch (err) {
+          console.warn(`${err.name}, ${err.message}`);
+        }
+      }
+    }
+    async function releaseWakeLock() {
+      if (wakeLock !== null) {
+        await wakeLock.release();
+        wakeLock = null;
+        console.log("Wake Lock released");
+      }
+    }
 
-            // Display results
-            upLog.innerHTML = "";
-            if (interruptions.length === 0) {
-            upLog.innerHTML = '<li class="log-empty">中断は検出されませんでした 🎉</li>';
-            } else {
-            interruptions.forEach((int, idx) => addLog(upLog, idx + 1, int.duration, int.at));
-            }
-
-            const totalInt = interruptions.reduce((s, i) => s + i.duration, 0);
-            upStatCount.textContent = interruptions.length;
-            upStatTotal.textContent = totalInt.toFixed(1);
-            upStatLongest.textContent = interruptions.length ? Math.max(...interruptions.map(i =>
-            i.duration)).toFixed(1) : "0.0";
-            upStatCCF.textContent = duration > 0 ? Math.round(Math.max(0, (duration - totalInt) / duration * 100)) :
-            "-";
-            if (totalInt > 10) upCardTotal.classList.add("highlight-red"); else
-            upCardTotal.classList.remove("highlight-red");
-
-            upProgressLabel.textContent = "解析完了！";
-            upProgressPct.textContent = "100%";
-            upProgressFill.style.width = "100%";
-            upStatusBadge.className = "status-badge idle";
-            upStatusText.textContent = "完了";
-            upAnalyzing = false;
-
-            // Build per-frame status map for telop generation
-            const frameStatusMap = [];
-            for (let i = 0; i < timestamps.length; i++) { const t=timestamps[i]; // Find if this time falls within any
-              interruption let status="compressing" ; let intDuration=0; for (const intItem of interruptions) { if (t>=
-              intItem.at && t < intItem.at + intItem.duration) { status="interrupting" ; intDuration=t - intItem.at;
-                break; } } // Before first compression detected, show idle if (i < windowSize) status="detecting" ;
-                frameStatusMap.push({ time: t, status, intDuration }); } // Store analysis data for video generation
-                window._cprAnalysis={ interruptions, totalInt, duration, frameStatusMap, ccf: duration> 0 ?
-                Math.round(Math.max(0, (duration - totalInt) / duration * 100)) : 0
-                };
-
-                // Show generate button
-                document.getElementById("generate-section").classList.add("active");
-                releaseWakeLock();
-                });
-
-                upBtnReset.addEventListener("click", () => {
-                upAnalyzing = false;
-                releaseWakeLock();
-                uploadVideo.src = ""; uploadVideo.load();
-                upVideoWrapper.style.display = "none"; uploadArea.style.display = "";
-                upProgress.classList.remove("active"); upProgressFill.style.width = "0%";
-                upStats.style.display = "none"; upLogSection.style.display = "none";
-                upBtnAnalyze.disabled = true;
-                upStatCount.textContent = "0"; upStatTotal.textContent = "0.0"; upStatLongest.textContent = "0.0";
-                upStatCCF.textContent = "-";
-                upLog.innerHTML = '<li class="log-empty">まだ中断は記録されていません</li>';
-                upStatusBadge.className = "status-badge idle"; upStatusText.textContent = "待機中";
-                upCardTotal.classList.remove("highlight-red");
-                fileInput.value = "";
-                // Reset generate section
-                document.getElementById("generate-section").classList.remove("active");
-                document.getElementById("gen-progress").classList.remove("active");
-                document.getElementById("download-link").style.display = "none";
-                const previewWrapper = document.getElementById("preview-wrapper");
-                if (previewWrapper) previewWrapper.style.display = "none";
-                const previewVideo = document.getElementById("preview-video");
-                if (previewVideo) previewVideo.src = "";
-                window._cprAnalysis = null;
-                });
-
-                // ========== Wake Lock Helper ==========
-                let wakeLock = null;
-                async function requestWakeLock() {
-                if ('wakeLock' in navigator) {
-                try {
-                wakeLock = await navigator.wakeLock.request('screen');
-                console.log("Wake Lock is active");
-                } catch (err) {
-                console.warn(`${err.name}, ${err.message}`);
-                }
-                }
-                }
-                async function releaseWakeLock() {
-                if (wakeLock !== null) {
-                await wakeLock.release();
-                wakeLock = null;
-                console.log("Wake Lock released");
-                }
-                }
-
-                // ========== Shared Log Helper ==========
-                function addLog(listEl, idx, duration, atSec) {
-                const empty = listEl.querySelector(".log-empty");
-                if (empty) empty.remove();
-                const li = document.createElement("li");
-                const atStr = `${String(Math.floor(atSec / 60)).padStart(2, "0")}:${String(Math.floor(atSec %
-                60)).padStart(2, "0")}`;
-                li.innerHTML = `
+    // ========== Shared Log Helper ==========
+    function addLog(listEl, idx, duration, atSec) {
+      const empty = listEl.querySelector(".log-empty");
+      if (empty) empty.remove();
+      const li = document.createElement("li");
+      const atStr = `${String(Math.floor(atSec / 60)).padStart(2, "0")}:${String(Math.floor(atSec %
+        60)).padStart(2, "0")}`;
+      li.innerHTML = `
                 <span class="log-idx">#${idx}</span>
                 <span class="log-at">@ ${atStr}</span>
                 <span class="log-time">${duration.toFixed(2)} 秒</span>
                 ${duration >= 10 ? '<span class="log-warn">⚠ 10秒超</span>' : ""}
                 `;
-                listEl.appendChild(li);
-                }
+      listEl.appendChild(li);
+    }
 
-                // ========== Init ==========
-                async function init() {
-                try {
-                // Only load AI model on init, camera starts on button press
-                await initMediaPipe("VIDEO");
-                rtLoading.classList.add("hidden");
-                rtBtnStart.disabled = false;
-                } catch (err) {
-                document.getElementById("rt-loading-text").textContent =
-                "AIモデルの読み込みに失敗: " + err.message;
-                console.error(err);
-                }
-                }
-                init();
+    // ========== Init ==========
+    async function init() {
+      try {
+        // Only load AI model on init, camera starts on button press
+        await initMediaPipe("VIDEO");
+        rtLoading.classList.add("hidden");
+        rtBtnStart.disabled = false;
+      } catch (err) {
+        document.getElementById("rt-loading-text").textContent =
+          "AIモデルの読み込みに失敗: " + err.message;
+        console.error(err);
+      }
+    }
+    init();
 
-                // ========== Telop Video Generation ==========
-                document.getElementById("up-btn-generate").addEventListener("click", async () => {
-                const analysis = window._cprAnalysis;
-                if (!analysis) return;
+    // ========== Telop Video Generation ==========
+    document.getElementById("up-btn-generate").addEventListener("click", async () => {
+      const analysis = window._cprAnalysis;
+      if (!analysis) return;
 
-                const video = uploadVideo;
-                const canvas = document.getElementById("telop-canvas");
-                const ctx = canvas.getContext("2d");
-                const genProgress = document.getElementById("gen-progress");
-                const genProgressLabel = document.getElementById("gen-progress-label");
-                const genProgressPct = document.getElementById("gen-progress-pct");
-                const genProgressFill = document.getElementById("gen-progress-fill");
-                const downloadLink = document.getElementById("download-link");
-                const downloadAnchor = document.getElementById("download-anchor");
-                const btnGenerate = document.getElementById("up-btn-generate");
+      const video = uploadVideo;
+      const canvas = document.getElementById("telop-canvas");
+      const ctx = canvas.getContext("2d");
+      const genProgress = document.getElementById("gen-progress");
+      const genProgressLabel = document.getElementById("gen-progress-label");
+      const genProgressPct = document.getElementById("gen-progress-pct");
+      const genProgressFill = document.getElementById("gen-progress-fill");
+      const downloadLink = document.getElementById("download-link");
+      const downloadAnchor = document.getElementById("download-anchor");
+      const btnGenerate = document.getElementById("up-btn-generate");
 
-                btnGenerate.disabled = true;
-                genProgress.classList.add("active");
-                downloadLink.style.display = "none";
-                await requestWakeLock();
+      btnGenerate.disabled = true;
+      genProgress.classList.add("active");
+      downloadLink.style.display = "none";
+      await requestWakeLock();
 
-                // Set canvas to video size
-                const vw = video.videoWidth || 640;
-                const vh = video.videoHeight || 480;
-                canvas.width = vw;
-                canvas.height = vh;
+      // Set canvas to video size
+      const vw = video.videoWidth || 640;
+      const vh = video.videoHeight || 480;
+      canvas.width = vw;
+      canvas.height = vh;
 
-                const outFps = 10; // Match analysis FPS for better sync
-                const duration = analysis.duration;
-                const totalFrames = Math.floor(duration * outFps);
-                const frameInterval = 1000 / outFps; // 100ms per frame for 10fps
+      const outFps = 10; // Match analysis FPS for better sync
+      const duration = analysis.duration;
+      const totalFrames = Math.floor(duration * outFps);
+      const frameInterval = 1000 / outFps; // 100ms per frame for 10fps
 
-                // ----- Phase 1: Pre-render all frames -----
-                genProgressLabel.textContent = "フレームを準備中…";
+      // ----- Phase 1: Pre-render all frames -----
+      genProgressLabel.textContent = "フレームを準備中…";
 
-                // Fast Seek helper using requestVideoFrameCallback
-                function fastSeek(v, t) {
-                return new Promise(resolve => {
-                let resolved = false;
-                const fallbackId = setTimeout(() => {
-                if (!resolved) { resolved = true; resolve(); }
-                }, 300);
+      // Fast Seek helper using requestVideoFrameCallback
+      function fastSeek(v, t) {
+        return new Promise(resolve => {
+          let resolved = false;
+          const fallbackId = setTimeout(() => {
+            if (!resolved) { resolved = true; resolve(); }
+          }, 300);
 
-                if ('requestVideoFrameCallback' in v) {
-                v.requestVideoFrameCallback(() => {
-                if (!resolved) { clearTimeout(fallbackId); resolved = true; resolve(); }
-                });
-                } else {
-                const onS = () => {
-                v.removeEventListener("seeked", onS);
-                if (!resolved) { clearTimeout(fallbackId); resolved = true; setTimeout(resolve, 30); }
-                };
-                v.addEventListener("seeked", onS);
-                }
-                v.currentTime = t;
-                });
-                }
+          if ('requestVideoFrameCallback' in v) {
+            v.requestVideoFrameCallback(() => {
+              if (!resolved) { clearTimeout(fallbackId); resolved = true; resolve(); }
+            });
+          } else {
+            const onS = () => {
+              v.removeEventListener("seeked", onS);
+              if (!resolved) { clearTimeout(fallbackId); resolved = true; setTimeout(resolve, 30); }
+            };
+            v.addEventListener("seeked", onS);
+          }
+          v.currentTime = t;
+        });
+      }
 
-                // Pre-render frames as ImageBitmap for consistent timing
-                const renderedFrames = [];
-                for (let i = 0; i <= totalFrames; i++) { const t=i / outFps; if (t> duration) break;
+      // Pre-render frames as ImageBitmap for consistent timing
+      const renderedFrames = [];
+      for (let i = 0; i <= totalFrames; i++) {
+        const t = i / outFps;
+        if (t > duration) break;
 
-                  await fastSeek(video, t);
+        await fastSeek(video, t);
 
-                  // Draw video frame
-                  ctx.drawImage(video, 0, 0, vw, vh);
+        // Draw video frame
+        ctx.drawImage(video, 0, 0, vw, vh);
 
-                  // Determine status at this time
-                  let status = "compressing";
-                  let intDuration = 0;
-                  let intCount = 0;
-                  let totalIntSoFar = 0;
+        // Determine status at this time
+        let status = "compressing";
+        let intDuration = 0;
+        let intCount = 0;
+        let totalIntSoFar = 0;
 
-                  for (let j = 0; j < analysis.interruptions.length; j++) { const intItem=analysis.interruptions[j]; if
-                    (t>= intItem.at) {
-                    if (t < intItem.at + intItem.duration) { status="interrupting" ; intDuration=t - intItem.at;
-                      intCount=j + 1; totalIntSoFar +=intDuration; } else { totalIntSoFar +=intItem.duration; intCount=j
-                      + 1; } } } // --- Draw telop overlays --- const scale=vw / 640; // Status badge const badgeH=50 *
-                      scale; const badgeY=24 * scale; const badgeX=24 * scale; ctx.save(); if (status==="interrupting" )
-                      { ctx.fillStyle="rgba(255, 23, 68, 0.95)" ; const badgeW=320 * scale; roundRect(ctx, badgeX,
-                      badgeY, badgeW, badgeH, 25 * scale); ctx.fill(); ctx.fillStyle="#fff" ; ctx.font=`bold ${28 *
-                      scale}px Inter, sans-serif`; ctx.textBaseline="middle" ; ctx.fillText(`⛔ 中断中
-                      ${intDuration.toFixed(1)}秒`, badgeX + 20 * scale, badgeY + badgeH / 2); } else {
-                      ctx.fillStyle="rgba(0, 230, 118, 0.95)" ; const badgeW=200 * scale; roundRect(ctx, badgeX, badgeY,
-                      badgeW, badgeH, 25 * scale); ctx.fill(); ctx.fillStyle="#0a0e17" ; ctx.font=`bold ${28 * scale}px
-                      Inter, sans-serif`; ctx.textBaseline="middle" ; ctx.fillText("✅ 圧迫中", badgeX + 20 * scale, badgeY
-                      + badgeH / 2); } ctx.restore(); // Big timer if (status==="interrupting" && intDuration>= 0.5) {
-                      ctx.save();
-                      ctx.fillStyle = intDuration >= 10 ? "#ff1744" : "#ffffff";
-                      ctx.font = `900 ${140 * scale}px Inter, sans-serif`;
-                      ctx.textAlign = "center"; ctx.textBaseline = "middle";
-                      ctx.shadowColor = "rgba(0,0,0,0.9)"; ctx.shadowBlur = 20 * scale;
-                      ctx.fillText(intDuration.toFixed(1), vw / 2, vh / 2);
-                      ctx.restore();
-                      }
+        for (let j = 0; j < analysis.interruptions.length; j++) {
+          const intItem = analysis.interruptions[j];
+          if (t >= intItem.at) {
+            if (t < intItem.at + intItem.duration) {
+              status = "interrupting";
+              intDuration = t - intItem.at;
+              intCount = j + 1;
+              totalIntSoFar += intDuration;
+            } else {
+              totalIntSoFar += intItem.duration;
+              intCount = j + 1;
+            }
+          }
+        }
 
-                      // Warning Border
-                      if (status === "interrupting" && intDuration >= 10) {
-                      ctx.save();
-                      ctx.strokeStyle = "#ff1744"; ctx.lineWidth = 12 * scale;
-                      ctx.strokeRect(6 * scale, 6 * scale, vw - 12 * scale, vh - 12 * scale);
-                      ctx.restore();
-                      }
+        // --- Draw telop overlays --- 
+        const scale = vw / 640;
+        // Status badge 
+        const badgeH = 50 * scale;
+        const badgeY = 24 * scale;
+        const badgeX = 24 * scale;
+        ctx.save();
+        if (status === "interrupting") {
+          ctx.fillStyle = "rgba(255, 23, 68, 0.95)";
+          const badgeW = 320 * scale;
+          roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 25 * scale);
+          ctx.fill();
+          ctx.fillStyle = "#fff";
+          ctx.font = `bold ${28 * scale}px Inter, sans-serif`;
+          ctx.textBaseline = "middle";
+          ctx.fillText(`⛔ 中断中 ${intDuration.toFixed(1)}秒`, badgeX + 20 * scale, badgeY + badgeH / 2);
+        } else {
+          ctx.fillStyle = "rgba(0, 230, 118, 0.95)";
+          const badgeW = 200 * scale;
+          roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 25 * scale);
+          ctx.fill();
+          ctx.fillStyle = "#0a0e17";
+          ctx.font = `bold ${28 * scale}px Inter, sans-serif`;
+          ctx.textBaseline = "middle";
+          ctx.fillText("✅ 圧迫中", badgeX + 20 * scale, badgeY + badgeH / 2);
+        }
+        ctx.restore();
 
-                      // Bottom Bar
-                      const barH = 60 * scale;
-                      ctx.save();
-                      ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
-                      ctx.fillRect(0, vh - barH, vw, barH);
-                      ctx.fillStyle = "#fff";
-                      ctx.font = `bold ${20 * scale}px Inter, sans-serif`;
-                      ctx.textBaseline = "middle";
-                      const barMid = vh - barH / 2;
-                      const min = String(Math.floor(t / 60)).padStart(2, "0");
-                      const sec = String(Math.floor(t % 60)).padStart(2, "0");
-                      ctx.fillText(`⏱ ${min}:${sec}`, 20 * scale, barMid);
-                      ctx.fillText(`中断: ${intCount}回`, 160 * scale, barMid);
-                      ctx.fillText(`合計: ${totalIntSoFar.toFixed(1)}s`, 320 * scale, barMid);
-                      const ccf = t > 0 ? Math.round(Math.max(0, (t - totalIntSoFar) / t * 100)) : 100;
-                      ctx.fillText(`CCF: ${ccf}%`, 500 * scale, barMid);
-                      ctx.restore();
+        // Big timer 
+        if (status === "interrupting" && intDuration >= 0.5) {
+          ctx.save();
+          ctx.fillStyle = intDuration >= 10 ? "#ff1744" : "#ffffff";
+          ctx.font = `900 ${140 * scale}px Inter, sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.shadowColor = "rgba(0,0,0,0.9)";
+          ctx.shadowBlur = 20 * scale;
+          ctx.fillText(intDuration.toFixed(1), vw / 2, vh / 2);
+          ctx.restore();
+        }
 
-                      // Save rendered frame as ImageBitmap
-                      const bitmap = await createImageBitmap(canvas);
-                      renderedFrames.push(bitmap);
+        // Warning Border
+        if (status === "interrupting" && intDuration >= 10) {
+          ctx.save();
+          ctx.strokeStyle = "#ff1744";
+          ctx.lineWidth = 12 * scale;
+          ctx.strokeRect(6 * scale, 6 * scale, vw - 12 * scale, vh - 12 * scale);
+          ctx.restore();
+        }
 
-                      // Progress (phase 1)
-                      const pct = Math.round((i / totalFrames) * 50); // 0-50%
-                      genProgressPct.textContent = pct + "%";
-                      genProgressFill.style.width = pct + "%";
-                      genProgressLabel.textContent = `フレーム準備中… ${i + 1}/${totalFrames + 1}`;
+        // Bottom Bar
+        const barH = 60 * scale;
+        ctx.save();
+        ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+        ctx.fillRect(0, vh - barH, vw, barH);
+        ctx.fillStyle = "#fff";
+        ctx.font = `bold ${20 * scale}px Inter, sans-serif`;
+        ctx.textBaseline = "middle";
+        const barMid = vh - barH / 2;
+        const min = String(Math.floor(t / 60)).padStart(2, "0");
+        const sec = String(Math.floor(t % 60)).padStart(2, "0");
+        ctx.fillText(`⏱ ${min}:${sec}`, 20 * scale, barMid);
+        ctx.fillText(`中断: ${intCount}回`, 160 * scale, barMid);
+        ctx.fillText(`合計: ${totalIntSoFar.toFixed(1)}s`, 320 * scale, barMid);
+        const ccf = t > 0 ? Math.round(Math.max(0, (t - totalIntSoFar) / t * 100)) : 100;
+        ctx.fillText(`CCF: ${ccf}%`, 500 * scale, barMid);
+        ctx.restore();
 
-                      if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
-                      }
+        // Save rendered frame as ImageBitmap
+        const bitmap = await createImageBitmap(canvas);
+        renderedFrames.push(bitmap);
 
-                      // ----- Phase 2: Play back frames at constant FPS for recording -----
-                      genProgressLabel.textContent = "動画をエンコード中…";
+        // Progress (phase 1)
+        const pct = Math.round((i / totalFrames) * 50); // 0-50%
+        genProgressPct.textContent = pct + "%";
+        genProgressFill.style.width = pct + "%";
+        genProgressLabel.textContent = `フレーム準備中… ${i + 1}/${totalFrames + 1}`;
 
-                      // MediaRecorder setup
-                      const stream = canvas.captureStream(0);
-                      const mimeTypes = [
-                      'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
-                      'video/mp4;codecs=avc1',
-                      'video/mp4',
-                      'video/webm;codecs=vp9',
-                      'video/webm;codecs=vp8',
-                      'video/webm'
-                      ];
-                      let mimeType = '';
-                      for (const mt of mimeTypes) {
-                      if (MediaRecorder.isTypeSupported(mt)) { mimeType = mt; break; }
-                      }
-                      if (!mimeType) mimeType = '';
-                      const recorderOpts = { videoBitsPerSecond: 4000000 };
-                      if (mimeType) recorderOpts.mimeType = mimeType;
-                      const recorder = new MediaRecorder(stream, recorderOpts);
-                      const chunks = [];
-                      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+        if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
+      }
 
-                      const recorderReady = new Promise(resolve => {
-                      recorder.onstop = resolve;
-                      });
-                      recorder.start();
+      // ----- Phase 2: Play back frames at constant FPS for recording -----
+      genProgressLabel.textContent = "動画をエンコード中…";
 
-                      // Play back pre-rendered frames at exact intervals
-                      for (let i = 0; i < renderedFrames.length; i++) { const frameStart=performance.now(); // Draw
-                        pre-rendered frame ctx.drawImage(renderedFrames[i], 0, 0); // Send frame to recorder if
-                        (stream.getTracks()[0].requestFrame) { stream.getTracks()[0].requestFrame(); } // Progress
-                        (phase 2: 50-100%) const pct=50 + Math.round((i / renderedFrames.length) * 50);
-                        genProgressPct.textContent=pct + "%" ; genProgressFill.style.width=pct + "%" ;
-                        genProgressLabel.textContent=`動画エンコード中… ${i + 1}/${renderedFrames.length}`; // Wait exactly
-                        frameInterval ms to maintain constant FPS const elapsed=performance.now() - frameStart; const
-                        waitTime=Math.max(0, frameInterval - elapsed); await new Promise(r=> setTimeout(r, waitTime));
-                        }
+      // MediaRecorder setup
+      const stream = canvas.captureStream(0);
+      const mimeTypes = [
+        'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+        'video/mp4;codecs=avc1',
+        'video/mp4',
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm'
+      ];
+      let mimeType = '';
+      for (const mt of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mt)) { mimeType = mt; break; }
+      }
+      if (!mimeType) mimeType = '';
+      const recorderOpts = { videoBitsPerSecond: 4000000 };
+      if (mimeType) recorderOpts.mimeType = mimeType;
+      const recorder = new MediaRecorder(stream, recorderOpts);
+      const chunks = [];
+      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
 
-                        // Clean up bitmaps
-                        renderedFrames.forEach(bm => bm.close());
+      const recorderReady = new Promise(resolve => {
+        recorder.onstop = resolve;
+      });
+      recorder.start();
 
-                        recorder.stop();
-                        await recorderReady;
+      // Play back pre-rendered frames at exact intervals
+      for (let i = 0; i < renderedFrames.length; i++) {
+        const frameStart = performance.now();
 
-                        // Create downloadable blob
-                        const actualType = mimeType || recorder.mimeType || "video/mp4";
-                        const blob = new Blob(chunks, { type: actualType });
-                        const url = URL.createObjectURL(blob);
-                        downloadAnchor.href = url;
-                        const ext = actualType.includes("webm") ? "webm" : "mp4";
-                        downloadAnchor.download = `cpr_analysis.${ext}`;
-                        downloadLink.style.display = "block";
+        // Draw pre-rendered frame 
+        ctx.drawImage(renderedFrames[i], 0, 0);
 
-                        // Update preview video
-                        const previewVideo = document.getElementById("preview-video");
-                        const previewWrapper = document.getElementById("preview-wrapper");
-                        previewVideo.src = url;
-                        previewWrapper.style.display = "block";
+        // Send frame to recorder 
+        if (stream.getTracks()[0].requestFrame) {
+          stream.getTracks()[0].requestFrame();
+        }
 
-                        genProgressLabel.textContent = "動画生成完了！";
-                        genProgressPct.textContent = "100%";
-                        genProgressFill.style.width = "100%";
-                        btnGenerate.disabled = false;
-                        releaseWakeLock();
-                        });
+        // Progress (phase 2: 50 - 100 %) 
+        const pct = 50 + Math.round((i / renderedFrames.length) * 50);
+        genProgressPct.textContent = pct + "%";
+        genProgressFill.style.width = pct + "%";
+        genProgressLabel.textContent = `動画エンコード中… ${i + 1}/${renderedFrames.length}`;
 
-                        function roundRect(ctx, x, y, w, h, r) {
-                        ctx.beginPath();
-                        ctx.moveTo(x + r, y);
-                        ctx.lineTo(x + w - r, y);
-                        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-                        ctx.lineTo(x + w, y + h - r);
-                        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-                        ctx.lineTo(x + r, y + h);
-                        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-                        ctx.lineTo(x, y + r);
-                        ctx.quadraticCurveTo(x, y, x + r, y);
-                        ctx.closePath();
-                        }
-                        </script>
+        // Wait exactly frameInterval ms to maintain constant FPS 
+        const elapsed = performance.now() - frameStart;
+        const waitTime = Math.max(0, frameInterval - elapsed);
+        await new Promise(r => setTimeout(r, waitTime));
+      }
+
+      // Clean up bitmaps
+      renderedFrames.forEach(bm => bm.close());
+
+      recorder.stop();
+      await recorderReady;
+
+      // Create downloadable blob
+      const actualType = mimeType || recorder.mimeType || "video/mp4";
+      const blob = new Blob(chunks, { type: actualType });
+      const url = URL.createObjectURL(blob);
+      downloadAnchor.href = url;
+      const ext = actualType.includes("webm") ? "webm" : "mp4";
+      downloadAnchor.download = `cpr_analysis.${ext}`;
+      downloadLink.style.display = "block";
+
+      // Update preview video
+      const previewVideo = document.getElementById("preview-video");
+      const previewWrapper = document.getElementById("preview-wrapper");
+      previewVideo.src = url;
+      previewWrapper.style.display = "block";
+
+      genProgressLabel.textContent = "動画生成完了！";
+      genProgressPct.textContent = "100%";
+      genProgressFill.style.width = "100%";
+      btnGenerate.disabled = false;
+      releaseWakeLock();
+    });
+
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    }
+  </script>
 </body>
 
 </html>
