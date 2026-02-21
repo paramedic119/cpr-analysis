@@ -647,6 +647,59 @@
     #rt-capture-canvas {
       display: none;
     }
+
+    /* --- Model Selector --- */
+    .model-selector {
+      margin-bottom: 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .model-label {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+
+    .model-toggle {
+      display: flex;
+      gap: 4px;
+      background: var(--bg-primary);
+      border-radius: 10px;
+      padding: 3px;
+    }
+
+    .model-btn {
+      padding: 8px 14px;
+      border: none;
+      border-radius: 8px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text-secondary);
+      transition: all 0.25s;
+      white-space: nowrap;
+    }
+
+    .model-btn.active {
+      background: linear-gradient(135deg, #1e3a5f, #1a2238);
+      color: var(--text-primary);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    .model-btn.active[data-model="full"] {
+      background: linear-gradient(135deg, #4a148c, #6a1b9a);
+      color: #e1bee7;
+    }
   </style>
 </head>
 
@@ -760,6 +813,14 @@
         </div>
       </div>
 
+      <div class="model-selector" id="model-selector">
+        <span class="model-label">解析精度</span>
+        <div class="model-toggle">
+          <button class="model-btn active" data-model="lite">⚡ Lite（高速）</button>
+          <button class="model-btn" data-model="full">🎯 Full（高精度）</button>
+        </div>
+      </div>
+
       <div class="controls" id="up-controls">
         <button class="btn btn-upload" id="up-btn-analyze" disabled>🔍 解析開始</button>
         <button class="btn btn-reset" id="up-btn-reset">↺</button>
@@ -818,7 +879,13 @@
 
     // ========== Shared ==========
     let poseLandmarker = null;
+    let currentModelType = "lite"; // "lite" or "full"
     const TRACK_INDEX = 12; // RIGHT_SHOULDER (shoulders move up/down during CPR, wrists stay on chest)
+
+    const MODEL_PATHS = {
+      lite: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
+      full: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task"
+    };
 
     // Detect rhythmic oscillation (CPR = 100-120/min = ~2Hz)
     function detectCPR(yArray) {
@@ -866,11 +933,22 @@
     let rtInterruptions = [];
     let rtAnimId = null;
 
-    async function initMediaPipe(mode) {
-      if (poseLandmarker) {
+    async function initMediaPipe(mode, modelType = "lite") {
+      const needNewModel = !poseLandmarker || currentModelType !== modelType;
+
+      if (poseLandmarker && !needNewModel) {
         await poseLandmarker.setOptions({ runningMode: mode });
         return;
       }
+
+      // 既存のモデルを破棄
+      if (poseLandmarker) {
+        poseLandmarker.close();
+        poseLandmarker = null;
+      }
+      currentModelType = modelType;
+      const modelPath = MODEL_PATHS[modelType];
+
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
       );
@@ -878,7 +956,7 @@
       try {
         poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
           baseOptions: {
-            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
+            modelAssetPath: modelPath,
             delegate: "GPU"
           },
           runningMode: mode,
@@ -888,7 +966,7 @@
         console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
         poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
           baseOptions: {
-            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
+            modelAssetPath: modelPath,
             delegate: "CPU"
           },
           runningMode: mode,
@@ -1196,6 +1274,17 @@
       upLogSection.style.display = "none";
     }
 
+    // ========== Model Selector ==========
+    let selectedModelType = "lite";
+    const modelBtns = document.querySelectorAll(".model-btn");
+    modelBtns.forEach(btn => {
+      btn.addEventListener("click", () => {
+        modelBtns.forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        selectedModelType = btn.dataset.model;
+      });
+    });
+
     upBtnAnalyze.addEventListener("click", async () => {
       if (upAnalyzing) return;
       upAnalyzing = true;
@@ -1204,9 +1293,12 @@
       upProgress.classList.add("active");
       upStats.style.display = "grid";
       upLogSection.style.display = "";
-      upLog.innerHTML = '<li class="log-empty">解析中…</li>';
 
-      await initMediaPipe("VIDEO");
+      const modelLabel = selectedModelType === "full" ? "Full（高精度）" : "Lite（高速）";
+      upLog.innerHTML = '<li class="log-empty">解析中…</li>';
+      upProgressLabel.textContent = `AIモデル（${modelLabel}）を読み込み中…`;
+
+      await initMediaPipe("VIDEO", selectedModelType);
 
       // iOS Safari compatible seek helper
       function waitForSeek(videoEl, targetTime) {
