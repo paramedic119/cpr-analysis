@@ -719,14 +719,27 @@
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
       );
-      poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
-          delegate: "GPU"
-        },
-        runningMode: mode,
-        numPoses: 1
-      });
+      // GPU delegate → CPU fallback (iOS Safari does not support GPU delegate)
+      try {
+        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
+            delegate: "GPU"
+          },
+          runningMode: mode,
+          numPoses: 1
+        });
+      } catch (gpuErr) {
+        console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
+        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
+            delegate: "CPU"
+          },
+          runningMode: mode,
+          numPoses: 1
+        });
+      }
     }
 
     // ========== Tab Switching ==========
@@ -774,16 +787,22 @@
     }
 
     let rtLastVidTime = -1;
+    let rtFrameTs = 0;
     function rtLoop() {
       if (!rtMeasuring) return;
-      if (cameraVideo.currentTime !== rtLastVidTime) {
+      if (cameraVideo.readyState >= 2 && cameraVideo.currentTime !== rtLastVidTime) {
         rtLastVidTime = cameraVideo.currentTime;
-        const now = performance.now();
-        const res = poseLandmarker.detectForVideo(cameraVideo, now);
-        if (res?.landmarks?.length > 0) {
-          rtProcess(res.landmarks[0][WRIST_INDEX].y, now);
-        } else {
-          rtProcess(null, now);
+        rtFrameTs += 33.34; // increment monotonically (~30fps)
+        try {
+          const res = poseLandmarker.detectForVideo(cameraVideo, rtFrameTs);
+          const now = performance.now();
+          if (res && res.landmarks && res.landmarks.length > 0) {
+            rtProcess(res.landmarks[0][WRIST_INDEX].y, now);
+          } else {
+            rtProcess(null, now);
+          }
+        } catch (e) {
+          console.warn("detectForVideo error:", e);
         }
       }
       rtAnimId = requestAnimationFrame(rtLoop);
@@ -843,6 +862,7 @@
 
     rtBtnStart.addEventListener("click", () => {
       rtMeasuring = true; rtStartTime = performance.now(); rtLastStateTime = performance.now();
+      rtFrameTs = 0; rtLastVidTime = -1;
       rtBtnStart.disabled = true; rtBtnStop.disabled = false; rtLoop();
     });
     rtBtnStop.addEventListener("click", () => {
@@ -919,12 +939,31 @@
 
       await initMediaPipe("VIDEO");
 
-      // Seek through video frame by frame
-      const video = uploadVideo;
-      await new Promise(r => { video.currentTime = 0; video.onseeked = r; });
+      // iOS Safari compatible seek helper
+      function waitForSeek(videoEl, targetTime) {
+        return new Promise((resolve) => {
+          const onSeeked = () => { videoEl.removeEventListener('seeked', onSeeked); resolve(); };
+          videoEl.addEventListener('seeked', onSeeked);
+          videoEl.currentTime = targetTime;
+          // Fallback timeout for iOS Safari where seeked may not fire
+          setTimeout(() => { videoEl.removeEventListener('seeked', onSeeked); resolve(); }, 500);
+        });
+      }
 
-      const fps = 15; // sample at 15fps for speed
+      const video = uploadVideo;
+      // Wait for video metadata to be ready
+      if (video.readyState < 1) {
+        await new Promise(r => { video.onloadedmetadata = r; setTimeout(r, 2000); });
+      }
+      await waitForSeek(video, 0);
+
+      const fps = 10; // sample at 10fps for iOS compatibility
       const duration = video.duration;
+      if (!duration || !isFinite(duration)) {
+        upProgressLabel.textContent = "動画の長さを取得できません";
+        upAnalyzing = false; upBtnAnalyze.disabled = false;
+        return;
+      }
       const totalFrames = Math.floor(duration * fps);
       const yCoords = [];
       const timestamps = [];
@@ -932,19 +971,25 @@
       upStatusBadge.className = "status-badge analyzing";
       upStatusText.textContent = "解析中…";
 
+      let monotonicTs = 0;
       for (let i = 0; i <= totalFrames; i++) {
         const t = i / fps;
         if (t > duration) break;
 
-        video.currentTime = t;
-        await new Promise(r => { video.onseeked = r; });
+        await waitForSeek(video, t);
+        // Small delay to ensure frame is rendered (important for iOS)
+        await new Promise(r => setTimeout(r, 50));
 
-        const tsMs = t * 1000;
-        const res = poseLandmarker.detectForVideo(video, tsMs);
-
-        if (res?.landmarks?.length > 0) {
-          yCoords.push(res.landmarks[0][WRIST_INDEX].y);
-        } else {
+        monotonicTs += 100; // monotonically increasing timestamp
+        try {
+          const res = poseLandmarker.detectForVideo(video, monotonicTs);
+          if (res && res.landmarks && res.landmarks.length > 0) {
+            yCoords.push(res.landmarks[0][WRIST_INDEX].y);
+          } else {
+            yCoords.push(null);
+          }
+        } catch (e) {
+          console.warn("Frame analysis error:", e);
           yCoords.push(null);
         }
         timestamps.push(t);
@@ -956,7 +1001,7 @@
         upProgressLabel.textContent = `解析中… ${t.toFixed(1)}s / ${duration.toFixed(1)}s`;
 
         // Yield to UI
-        if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
+        if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
       }
 
       // Analyze
