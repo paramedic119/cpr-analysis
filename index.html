@@ -709,7 +709,34 @@
 
     // ========== Shared ==========
     let poseLandmarker = null;
-    const WRIST_INDEX = 16; // RIGHT_WRIST
+    const TRACK_INDEX = 12; // RIGHT_SHOULDER (shoulders move up/down during CPR, wrists stay on chest)
+
+    // Detect rhythmic oscillation (CPR = 100-120/min = ~2Hz)
+    function detectCPR(yArray) {
+      if (yArray.length < 10) return false;
+      // 1. Check amplitude (total movement range)
+      const minY = Math.min(...yArray);
+      const maxY = Math.max(...yArray);
+      const amplitude = maxY - minY;
+      if (amplitude < 0.02) return false; // too little movement
+
+      // 2. Count direction changes (peaks and valleys)
+      let directionChanges = 0;
+      let prevDir = 0; // 0=unknown, 1=up, -1=down
+      for (let i = 1; i < yArray.length; i++) {
+        const diff = yArray[i] - yArray[i - 1];
+        if (Math.abs(diff) < 0.002) continue; // ignore noise
+        const dir = diff > 0 ? 1 : -1;
+        if (prevDir !== 0 && dir !== prevDir) {
+          directionChanges++;
+        }
+        prevDir = dir;
+      }
+
+      // CPR at 100-120 BPM = ~2Hz = ~4 direction changes per second
+      // In our window of ~30 frames (~1s), expect >= 3 direction changes
+      return directionChanges >= 3;
+    }
 
     async function initMediaPipe(mode) {
       if (poseLandmarker) {
@@ -776,7 +803,7 @@
     let rtMeasuring = false, rtStartTime = 0, rtAnimId = null;
     let rtYHistory = [], rtCompressing = false, rtIntStart = null, rtInterruptions = [];
     let rtLastStateTime = 0;
-    const WINDOW = 20, THRESH = 0.015;
+    const WINDOW = 30; // ~1 second at 30fps
 
     async function startCamera() {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -792,12 +819,12 @@
       if (!rtMeasuring) return;
       if (cameraVideo.readyState >= 2 && cameraVideo.currentTime !== rtLastVidTime) {
         rtLastVidTime = cameraVideo.currentTime;
-        rtFrameTs += 33.34; // increment monotonically (~30fps)
+        rtFrameTs += 33.34;
         try {
           const res = poseLandmarker.detectForVideo(cameraVideo, rtFrameTs);
           const now = performance.now();
           if (res && res.landmarks && res.landmarks.length > 0) {
-            rtProcess(res.landmarks[0][WRIST_INDEX].y, now);
+            rtProcess(res.landmarks[0][TRACK_INDEX].y, now);
           } else {
             rtProcess(null, now);
           }
@@ -810,11 +837,10 @@
 
     function rtProcess(wy, ts) {
       if (wy !== null) rtYHistory.push(wy);
-      while (rtYHistory.length > WINDOW * 2) rtYHistory.shift();
+      while (rtYHistory.length > WINDOW * 3) rtYHistory.shift();
       if (rtYHistory.length < WINDOW) return;
       const win = rtYHistory.slice(-WINDOW);
-      const mov = Math.max(...win) - Math.min(...win);
-      const comp = mov > THRESH;
+      const comp = detectCPR(win);
 
       if (rtCompressing && !comp) { rtIntStart = ts; rtLastStateTime = ts; }
       else if (!rtCompressing && comp && rtIntStart !== null) {
@@ -984,7 +1010,7 @@
         try {
           const res = poseLandmarker.detectForVideo(video, monotonicTs);
           if (res && res.landmarks && res.landmarks.length > 0) {
-            yCoords.push(res.landmarks[0][WRIST_INDEX].y);
+            yCoords.push(res.landmarks[0][TRACK_INDEX].y);
           } else {
             yCoords.push(null);
           }
@@ -1004,8 +1030,8 @@
         if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
       }
 
-      // Analyze
-      const windowSize = Math.max(Math.floor(fps * 0.8), 5);
+      // Analyze using rhythmic peak detection
+      const windowSize = Math.max(Math.floor(fps * 1.0), 5); // 1 second window
       const interruptions = [];
       let isComp = false, intStartIdx = -1;
 
@@ -1013,8 +1039,7 @@
         const win = yCoords.slice(i, i + windowSize).filter(v => v !== null);
         let comp = false;
         if (win.length >= windowSize * 0.5) {
-          const mov = Math.max(...win) - Math.min(...win);
-          comp = mov > THRESH;
+          comp = detectCPR(win);
         }
 
         if (isComp && !comp) { intStartIdx = i; }
