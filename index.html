@@ -618,6 +618,35 @@
     .download-link a:active {
       transform: scale(0.96);
     }
+
+    /* Waveform & RT Recording */
+    .waveform-wrapper {
+      margin-top: 10px;
+      background: rgba(0, 0, 0, 0.5);
+      border-radius: 12px;
+      overflow: hidden;
+      height: 60px;
+      position: relative;
+    }
+
+    #rt-waveform {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .waveform-label {
+      position: absolute;
+      top: 4px;
+      left: 8px;
+      font-size: 0.7rem;
+      color: rgba(255, 255, 255, 0.5);
+      pointer-events: none;
+    }
+
+    #rt-capture-canvas {
+      display: none;
+    }
   </style>
 </head>
 
@@ -654,6 +683,13 @@
           <div></div>
         </div>
       </div>
+
+      <div class="waveform-wrapper">
+        <div class="waveform-label">MOTION GRAPH</div>
+        <canvas id="rt-waveform"></canvas>
+      </div>
+      <canvas id="rt-capture-canvas"></canvas>
+
       <div class="elapsed-bar">
         <span>⏱ 経過時間</span>
         <span class="elapsed-time" id="rt-elapsed">00:00</span>
@@ -681,6 +717,11 @@
           <div><span class="value" id="rt-stat-ccf">-</span><span class="unit">%</span></div>
         </div>
       </div>
+
+      <div class="download-link" id="rt-download-link">
+        <a id="rt-download-anchor" href="#" download="cpr_recording.mp4">⬇ 計測動画を保存</a>
+      </div>
+
       <div class="log-section">
         <h3>📋 中断ログ</h3>
         <ul class="log-list" id="rt-log">
@@ -806,6 +847,25 @@
       return directionChanges >= 3;
     }
 
+    // ========== Real-time Related ==========
+    const rtWaveformCanvas = document.getElementById("rt-waveform");
+    const rtWaveformCtx = rtWaveformCanvas.getContext("2d");
+    const rtCaptureCanvas = document.getElementById("rt-capture-canvas");
+    const rtCaptureCtx = rtCaptureCanvas.getContext("2d");
+    const rtDownloadLink = document.getElementById("rt-download-link");
+    const rtDownloadAnchor = document.getElementById("rt-download-anchor");
+
+    let rtRecorder = null;
+    let rtChunks = [];
+    let rtYHistory = [];
+    let rtMeasuring = false;
+    let rtStartTime = 0;
+    let rtLastStateTime = 0;
+    let rtIntStart = null;
+    let rtCompressing = false;
+    let rtInterruptions = [];
+    let rtAnimId = null;
+
     async function initMediaPipe(mode) {
       if (poseLandmarker) {
         await poseLandmarker.setOptions({ runningMode: mode });
@@ -868,10 +928,7 @@
     const rtCardTotal = document.getElementById("rt-card-total");
     const rtLog = document.getElementById("rt-log");
 
-    let rtMeasuring = false, rtStartTime = 0, rtAnimId = null;
-    let rtYHistory = [], rtCompressing = false, rtIntStart = null, rtInterruptions = [];
-    let rtLastStateTime = 0;
-    const WINDOW = 30; // ~1 second at 30fps
+    const WINDOW = 30; // ~1 second history
 
     async function startCamera() {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -885,6 +942,54 @@
     let rtFrameTs = 0;
     function rtLoop() {
       if (!rtMeasuring) return;
+
+      // Draw camera and HUD to capture canvas for recording
+      const vw = cameraVideo.videoWidth;
+      const vh = cameraVideo.videoHeight;
+      if (vw > 0) {
+        if (rtCaptureCanvas.width !== vw) {
+          rtCaptureCanvas.width = vw;
+          rtCaptureCanvas.height = vh;
+        }
+        rtCaptureCtx.drawImage(cameraVideo, 0, 0, vw, vh);
+
+        const scale = vw / 640;
+        const badgeH = 50 * scale;
+        const badgeY = 24 * scale;
+        const badgeX = 24 * scale;
+        rtCaptureCtx.save();
+        if (rtCompressing) {
+          rtCaptureCtx.fillStyle = "rgba(0, 230, 118, 0.95)";
+          const badgeW = 200 * scale;
+          roundRect(rtCaptureCtx, badgeX, badgeY, badgeW, badgeH, 25 * scale);
+          rtCaptureCtx.fill();
+          rtCaptureCtx.fillStyle = "#0a0e17";
+          rtCaptureCtx.font = `bold ${28 * scale}px Inter, sans-serif`;
+          rtCaptureCtx.textBaseline = "middle";
+          rtCaptureCtx.fillText("✅ 圧迫中", badgeX + 20 * scale, badgeY + badgeH / 2);
+        } else if (rtIntStart !== null) {
+          const d = (performance.now() - rtIntStart) / 1000;
+          rtCaptureCtx.fillStyle = "rgba(255, 23, 68, 0.95)";
+          const badgeW = 320 * scale;
+          roundRect(rtCaptureCtx, badgeX, badgeY, badgeW, badgeH, 25 * scale);
+          rtCaptureCtx.fill();
+          rtCaptureCtx.fillStyle = "#fff";
+          rtCaptureCtx.font = `bold ${28 * scale}px Inter, sans-serif`;
+          rtCaptureCtx.textBaseline = "middle";
+          rtCaptureCtx.fillText(`⛔ 中断中 ${d.toFixed(1)}秒`, badgeX + 20 * scale, badgeY + badgeH / 2);
+
+          if (d >= 0.5) {
+            rtCaptureCtx.fillStyle = d >= 10 ? "#ff1744" : "#ffffff";
+            rtCaptureCtx.font = `900 ${140 * scale}px Inter, sans-serif`;
+            rtCaptureCtx.textAlign = "center";
+            rtCaptureCtx.shadowColor = "rgba(0,0,0,0.9)";
+            rtCaptureCtx.shadowBlur = 20 * scale;
+            rtCaptureCtx.fillText(d.toFixed(1), vw / 2, vh / 2);
+          }
+        }
+        rtCaptureCtx.restore();
+      }
+
       if (cameraVideo.readyState >= 2 && cameraVideo.currentTime !== rtLastVidTime) {
         rtLastVidTime = cameraVideo.currentTime;
         rtFrameTs += 33.34;
@@ -918,6 +1023,39 @@
       }
       rtCompressing = comp;
       rtUpdateUI(comp, ts);
+      rtDrawWaveform();
+    }
+
+    function rtDrawWaveform() {
+      const w = rtWaveformCanvas.width = rtWaveformCanvas.clientWidth;
+      const h = rtWaveformCanvas.height = rtWaveformCanvas.clientHeight;
+      if (rtYHistory.length < 2) return;
+
+      rtWaveformCtx.clearRect(0, 0, w, h);
+      rtWaveformCtx.beginPath();
+      rtWaveformCtx.strokeStyle = "#00e676";
+      rtWaveformCtx.lineWidth = 2;
+      rtWaveformCtx.lineJoin = "round";
+
+      const points = rtYHistory.slice(-100); // Show last 100 points
+      const step = w / (points.length - 1);
+
+      // Auto-scale Y to fit canvas
+      const validPoints = points.filter(v => v !== null);
+      if (validPoints.length === 0) return;
+      const minVal = Math.min(...validPoints);
+      const maxVal = Math.max(...validPoints);
+      const range = Math.max(0.1, maxVal - minVal);
+
+      for (let i = 0; i < points.length; i++) {
+        const py = points[i];
+        if (py === null) continue;
+        const x = i * step;
+        const y = ((py - minVal) / range) * (h * 0.7) + (h * 0.15); // Scale and center
+        if (i === 0) rtWaveformCtx.moveTo(x, y);
+        else rtWaveformCtx.lineTo(x, y);
+      }
+      rtWaveformCtx.stroke();
     }
 
     function rtUpdateUI(comp, ts) {
@@ -972,10 +1110,27 @@
       await requestWakeLock();
       rtMeasuring = true; rtStartTime = performance.now(); rtLastStateTime = performance.now();
       rtFrameTs = 0; rtLastVidTime = -1;
+      rtChunks = [];
+      rtDownloadLink.style.display = "none";
+
+      const stream = rtCaptureCanvas.captureStream(20); // 20fps for recording
+      const mt = 'video/mp4;codecs="avc1.42E01E,mp4a.40.2"';
+      const options = MediaRecorder.isTypeSupported(mt) ? { mimeType: mt } : {};
+      rtRecorder = new MediaRecorder(stream, options);
+      rtRecorder.ondataavailable = e => { if (e.data.size > 0) rtChunks.push(e.data); };
+      rtRecorder.onstop = () => {
+        const blob = new Blob(rtChunks, { type: rtRecorder.mimeType || "video/mp4" });
+        const url = URL.createObjectURL(blob);
+        rtDownloadAnchor.href = url;
+        rtDownloadLink.style.display = "block";
+      };
+      rtRecorder.start();
+
       rtBtnStop.disabled = false; rtLoop();
     });
     rtBtnStop.addEventListener("click", () => {
       rtMeasuring = false; if (rtAnimId) cancelAnimationFrame(rtAnimId);
+      if (rtRecorder && rtRecorder.state !== "inactive") rtRecorder.stop();
       releaseWakeLock();
       if (rtIntStart) { const d = (performance.now() - rtIntStart) / 1000; if (d >= 1) { rtInterruptions.push({ duration: d, at: (rtIntStart - rtStartTime) / 1000 }); addLog(rtLog, rtInterruptions.length, d, (rtIntStart - rtStartTime) / 1000); } rtIntStart = null; }
       rtBtnStart.disabled = false; rtBtnStop.disabled = true;
@@ -986,6 +1141,8 @@
     });
     rtBtnReset.addEventListener("click", () => {
       rtMeasuring = false; if (rtAnimId) cancelAnimationFrame(rtAnimId);
+      if (rtRecorder && rtRecorder.state !== "inactive") rtRecorder.stop();
+      rtDownloadLink.style.display = "none";
       releaseWakeLock();
       rtYHistory.length = 0; rtInterruptions = []; rtIntStart = null; rtCompressing = false; rtLastStateTime = 0; rtStartTime = 0;
       rtStatCount.textContent = "0"; rtStatTotal.textContent = "0.0"; rtStatLongest.textContent = "0.0"; rtStatCCF.textContent = "-"; rtElapsed.textContent = "00:00";
