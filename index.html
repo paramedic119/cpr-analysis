@@ -969,12 +969,14 @@
           return;
         }
       }
+      await requestWakeLock();
       rtMeasuring = true; rtStartTime = performance.now(); rtLastStateTime = performance.now();
       rtFrameTs = 0; rtLastVidTime = -1;
       rtBtnStop.disabled = false; rtLoop();
     });
     rtBtnStop.addEventListener("click", () => {
       rtMeasuring = false; if (rtAnimId) cancelAnimationFrame(rtAnimId);
+      releaseWakeLock();
       if (rtIntStart) { const d = (performance.now() - rtIntStart) / 1000; if (d >= 1) { rtInterruptions.push({ duration: d, at: (rtIntStart - rtStartTime) / 1000 }); addLog(rtLog, rtInterruptions.length, d, (rtIntStart - rtStartTime) / 1000); } rtIntStart = null; }
       rtBtnStart.disabled = false; rtBtnStop.disabled = true;
       rtUpdateUI(false, performance.now());
@@ -984,6 +986,7 @@
     });
     rtBtnReset.addEventListener("click", () => {
       rtMeasuring = false; if (rtAnimId) cancelAnimationFrame(rtAnimId);
+      releaseWakeLock();
       rtYHistory.length = 0; rtInterruptions = []; rtIntStart = null; rtCompressing = false; rtLastStateTime = 0; rtStartTime = 0;
       rtStatCount.textContent = "0"; rtStatTotal.textContent = "0.0"; rtStatLongest.textContent = "0.0"; rtStatCCF.textContent = "-"; rtElapsed.textContent = "00:00";
       rtLog.innerHTML = '<li class="log-empty">まだ中断は記録されていません</li>';
@@ -1039,6 +1042,7 @@
     upBtnAnalyze.addEventListener("click", async () => {
       if (upAnalyzing) return;
       upAnalyzing = true;
+      await requestWakeLock();
       upBtnAnalyze.disabled = true;
       upProgress.classList.add("active");
       upStats.style.display = "grid";
@@ -1070,6 +1074,7 @@
       if (!duration || !isFinite(duration)) {
         upProgressLabel.textContent = "動画の長さを取得できません";
         upAnalyzing = false; upBtnAnalyze.disabled = false;
+        releaseWakeLock();
         return;
       }
       const totalFrames = Math.floor(duration * fps);
@@ -1190,10 +1195,12 @@
 
       // Show generate button
       document.getElementById("generate-section").classList.add("active");
+      releaseWakeLock();
     });
 
     upBtnReset.addEventListener("click", () => {
       upAnalyzing = false;
+      releaseWakeLock();
       uploadVideo.src = ""; uploadVideo.load();
       upVideoWrapper.style.display = "none"; uploadArea.style.display = "";
       upProgress.classList.remove("active"); upProgressFill.style.width = "0%";
@@ -1210,6 +1217,26 @@
       document.getElementById("download-link").style.display = "none";
       window._cprAnalysis = null;
     });
+
+    // ========== Wake Lock Helper ==========
+    let wakeLock = null;
+    async function requestWakeLock() {
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLock = await navigator.wakeLock.request('screen');
+          console.log("Wake Lock is active");
+        } catch (err) {
+          console.warn(`${err.name}, ${err.message}`);
+        }
+      }
+    }
+    async function releaseWakeLock() {
+      if (wakeLock !== null) {
+        await wakeLock.release();
+        wakeLock = null;
+        console.log("Wake Lock released");
+      }
+    }
 
     // ========== Shared Log Helper ==========
     function addLog(listEl, idx, duration, atSec) {
@@ -1260,6 +1287,7 @@
       btnGenerate.disabled = true;
       genProgress.classList.add("active");
       downloadLink.style.display = "none";
+      await requestWakeLock();
 
       // Set canvas to video size
       const vw = video.videoWidth || 640;
@@ -1438,6 +1466,7 @@
       genProgressPct.textContent = "100%";
       genProgressFill.style.width = "100%";
       btnGenerate.disabled = false;
+      releaseWakeLock();
     });
 
     function roundRect(ctx, x, y, w, h, r) {
