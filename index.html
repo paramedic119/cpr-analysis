@@ -571,6 +571,53 @@
       color: var(--text-primary);
       font-variant-numeric: tabular-nums;
     }
+
+    /* --- Generate Video Button --- */
+    .btn-generate {
+      background: linear-gradient(135deg, #aa00ff, #d500f9);
+      color: white;
+    }
+
+    .btn-generate:hover:not(:disabled) {
+      box-shadow: 0 4px 20px rgba(170, 0, 255, 0.3);
+    }
+
+    .generate-section {
+      margin-top: 12px;
+      display: none;
+    }
+
+    .generate-section.active {
+      display: block;
+    }
+
+    .generate-section canvas {
+      display: none;
+    }
+
+    .download-link {
+      display: none;
+      margin-top: 10px;
+      text-align: center;
+    }
+
+    .download-link a {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #00c853, #00e676);
+      color: #0a0e17;
+      font-weight: 700;
+      text-decoration: none;
+      font-size: 0.95rem;
+      transition: all 0.2s;
+    }
+
+    .download-link a:active {
+      transform: scale(0.96);
+    }
   </style>
 </head>
 
@@ -701,6 +748,27 @@
           <li class="log-empty">まだ中断は記録されていません</li>
         </ul>
       </div>
+
+      <!-- Generate telop video section -->
+      <div class="generate-section" id="generate-section">
+        <div class="controls">
+          <button class="btn btn-generate" id="up-btn-generate">🎬 テロップ付き動画を生成</button>
+        </div>
+        <div class="progress-wrapper" id="gen-progress">
+          <div class="progress-label">
+            <span id="gen-progress-label">動画生成中…</span>
+            <span id="gen-progress-pct">0%</span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="gen-progress-fill"></div>
+          </div>
+        </div>
+        <canvas id="telop-canvas"></canvas>
+        <div class="download-link" id="download-link">
+          <a id="download-anchor" href="#" download="cpr_analysis.webm">⬇ テロップ付き動画をダウンロード</a>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -1091,6 +1159,37 @@
       upStatusBadge.className = "status-badge idle";
       upStatusText.textContent = "完了";
       upAnalyzing = false;
+
+      // Build per-frame status map for telop generation
+      const frameStatusMap = [];
+      for (let i = 0; i < timestamps.length; i++) {
+        const t = timestamps[i];
+        // Find if this time falls within any interruption
+        let status = "compressing";
+        let intDuration = 0;
+        for (const intItem of interruptions) {
+          if (t >= intItem.at && t < intItem.at + intItem.duration) {
+            status = "interrupting";
+            intDuration = t - intItem.at;
+            break;
+          }
+        }
+        // Before first compression detected, show idle
+        if (i < windowSize) status = "detecting";
+        frameStatusMap.push({ time: t, status, intDuration });
+      }
+
+      // Store analysis data for video generation
+      window._cprAnalysis = {
+        interruptions,
+        totalInt,
+        duration,
+        frameStatusMap,
+        ccf: duration > 0 ? Math.round(Math.max(0, (duration - totalInt) / duration * 100)) : 0
+      };
+
+      // Show generate button
+      document.getElementById("generate-section").classList.add("active");
     });
 
     upBtnReset.addEventListener("click", () => {
@@ -1105,6 +1204,11 @@
       upStatusBadge.className = "status-badge idle"; upStatusText.textContent = "待機中";
       upCardTotal.classList.remove("highlight-red");
       fileInput.value = "";
+      // Reset generate section
+      document.getElementById("generate-section").classList.remove("active");
+      document.getElementById("gen-progress").classList.remove("active");
+      document.getElementById("download-link").style.display = "none";
+      window._cprAnalysis = null;
     });
 
     // ========== Shared Log Helper ==========
@@ -1136,6 +1240,201 @@
       }
     }
     init();
+
+    // ========== Telop Video Generation ==========
+    document.getElementById("up-btn-generate").addEventListener("click", async () => {
+      const analysis = window._cprAnalysis;
+      if (!analysis) return;
+
+      const video = uploadVideo;
+      const canvas = document.getElementById("telop-canvas");
+      const ctx = canvas.getContext("2d");
+      const genProgress = document.getElementById("gen-progress");
+      const genProgressLabel = document.getElementById("gen-progress-label");
+      const genProgressPct = document.getElementById("gen-progress-pct");
+      const genProgressFill = document.getElementById("gen-progress-fill");
+      const downloadLink = document.getElementById("download-link");
+      const downloadAnchor = document.getElementById("download-anchor");
+      const btnGenerate = document.getElementById("up-btn-generate");
+
+      btnGenerate.disabled = true;
+      genProgress.classList.add("active");
+      downloadLink.style.display = "none";
+
+      // Set canvas to video size
+      const vw = video.videoWidth || 640;
+      const vh = video.videoHeight || 480;
+      canvas.width = vw;
+      canvas.height = vh;
+
+      const outFps = 15;
+      const duration = analysis.duration;
+      const totalFrames = Math.floor(duration * outFps);
+
+      // MediaRecorder setup
+      const stream = canvas.captureStream(outFps);
+      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9"
+        : MediaRecorder.isTypeSupported("video/webm") ? "video/webm"
+          : "video/mp4";
+      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
+      const chunks = [];
+      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+      const recorderReady = new Promise(resolve => {
+        recorder.onstop = resolve;
+      });
+      recorder.start();
+
+      // Seek helper
+      function waitSeek(v, t) {
+        return new Promise(resolve => {
+          const onS = () => { v.removeEventListener("seeked", onS); resolve(); };
+          v.addEventListener("seeked", onS);
+          v.currentTime = t;
+          setTimeout(() => { v.removeEventListener("seeked", onS); resolve(); }, 500);
+        });
+      }
+
+      for (let i = 0; i <= totalFrames; i++) {
+        const t = i / outFps;
+        if (t > duration) break;
+
+        await waitSeek(video, t);
+        await new Promise(r => setTimeout(r, 30));
+
+        // Draw video frame
+        ctx.drawImage(video, 0, 0, vw, vh);
+
+        // Determine status at this time
+        let status = "compressing";
+        let intDuration = 0;
+        let intCount = 0;
+        let totalIntSoFar = 0;
+
+        for (let j = 0; j < analysis.interruptions.length; j++) {
+          const intItem = analysis.interruptions[j];
+          const intEnd = intItem.at + intItem.duration;
+          if (intEnd <= t) {
+            totalIntSoFar += intItem.duration;
+            intCount = j + 1;
+          }
+          if (t >= intItem.at && t < intEnd) {
+            status = "interrupting";
+            intDuration = t - intItem.at;
+            intCount = j + 1;
+            totalIntSoFar += intDuration;
+          }
+        }
+
+        // --- Draw telop overlays ---
+        const scale = vw / 640; // scale text relative to 640px base
+
+        // Status badge (top-left)
+        const badgeH = 36 * scale;
+        const badgeY = 16 * scale;
+        const badgeX = 16 * scale;
+        ctx.save();
+        if (status === "interrupting") {
+          // Red badge
+          ctx.fillStyle = "rgba(255, 23, 68, 0.85)";
+          const badgeW = 200 * scale;
+          roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 18 * scale);
+          ctx.fill();
+          ctx.fillStyle = "#fff";
+          ctx.font = `bold ${18 * scale}px Inter, sans-serif`;
+          ctx.textBaseline = "middle";
+          ctx.fillText(`⛔ 中断中 ${intDuration.toFixed(1)}秒`, badgeX + 12 * scale, badgeY + badgeH / 2);
+        } else {
+          // Green badge
+          ctx.fillStyle = "rgba(0, 230, 118, 0.85)";
+          const badgeW = 150 * scale;
+          roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 18 * scale);
+          ctx.fill();
+          ctx.fillStyle = "#0a0e17";
+          ctx.font = `bold ${18 * scale}px Inter, sans-serif`;
+          ctx.textBaseline = "middle";
+          ctx.fillText("✅ 圧迫中", badgeX + 12 * scale, badgeY + badgeH / 2);
+        }
+        ctx.restore();
+
+        // Big interruption timer (center)
+        if (status === "interrupting" && intDuration >= 2) {
+          ctx.save();
+          ctx.fillStyle = intDuration >= 10 ? "rgba(255, 23, 68, 0.9)" : "rgba(255, 255, 255, 0.9)";
+          ctx.font = `900 ${72 * scale}px Inter, sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.shadowColor = "rgba(0,0,0,0.7)";
+          ctx.shadowBlur = 10 * scale;
+          ctx.fillText(intDuration.toFixed(1), vw / 2, vh / 2);
+          ctx.restore();
+        }
+
+        // Warning border
+        if (status === "interrupting" && intDuration >= 10) {
+          ctx.save();
+          ctx.strokeStyle = "rgba(255, 23, 68, 0.8)";
+          ctx.lineWidth = 6 * scale;
+          ctx.strokeRect(3 * scale, 3 * scale, vw - 6 * scale, vh - 6 * scale);
+          ctx.restore();
+        }
+
+        // Bottom stats bar
+        const barH = 40 * scale;
+        ctx.save();
+        ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+        ctx.fillRect(0, vh - barH, vw, barH);
+        ctx.fillStyle = "#fff";
+        ctx.font = `bold ${14 * scale}px Inter, sans-serif`;
+        ctx.textBaseline = "middle";
+        const barMid = vh - barH / 2;
+        const min = String(Math.floor(t / 60)).padStart(2, "0");
+        const sec = String(Math.floor(t % 60)).padStart(2, "0");
+        ctx.fillText(`⬩ ${min}:${sec}`, 12 * scale, barMid);
+        ctx.fillText(`中断: ${intCount}回`, 120 * scale, barMid);
+        ctx.fillText(`合計: ${totalIntSoFar.toFixed(1)}s`, 260 * scale, barMid);
+        const ccf = t > 0 ? Math.round(Math.max(0, (t - totalIntSoFar) / t * 100)) : 100;
+        ctx.fillText(`CCF: ${ccf}%`, 420 * scale, barMid);
+        ctx.restore();
+
+        // Progress
+        const pct = Math.round((i / totalFrames) * 100);
+        genProgressPct.textContent = pct + "%";
+        genProgressFill.style.width = pct + "%";
+        genProgressLabel.textContent = `動画生成中… ${t.toFixed(1)}s / ${duration.toFixed(1)}s`;
+
+        // Let recorder capture frame & yield to UI
+        await new Promise(r => setTimeout(r, 1000 / outFps));
+      }
+
+      recorder.stop();
+      await recorderReady;
+
+      // Create downloadable blob
+      const blob = new Blob(chunks, { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      downloadAnchor.href = url;
+      downloadAnchor.download = `cpr_analysis.${mimeType.includes("webm") ? "webm" : "mp4"}`;
+      downloadLink.style.display = "block";
+      genProgressLabel.textContent = "動画生成完了！";
+      genProgressPct.textContent = "100%";
+      genProgressFill.style.width = "100%";
+      btnGenerate.disabled = false;
+    });
+
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    }
   </script>
 </body>
 
