@@ -1273,9 +1273,9 @@
 
       // MediaRecorder setup
       const stream = canvas.captureStream(outFps);
-      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9"
-        : MediaRecorder.isTypeSupported("video/webm") ? "video/webm"
-          : "video/mp4";
+      const mimeType = MediaRecorder.isTypeSupported("video/mp4") ? "video/mp4"
+        : MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9"
+          : "video/webm";
       const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2500000 });
       const chunks = [];
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
