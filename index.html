@@ -596,7 +596,7 @@
         <video id="camera-video" autoplay playsinline muted></video>
         <div class="loading-screen" id="rt-loading">
           <div class="spinner"></div>
-          <div class="loading-text">AI モデルを読み込み中…</div>
+          <div class="loading-text" id="rt-loading-text">AI モデルを読み込み中…</div>
         </div>
         <div class="video-overlay">
           <div class="status-badge idle" id="rt-status-badge">
@@ -886,10 +886,24 @@
       rtElapsed.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
     }
 
-    rtBtnStart.addEventListener("click", () => {
+    rtBtnStart.addEventListener("click", async () => {
+      rtBtnStart.disabled = true;
+      // Start camera on first click
+      if (!cameraVideo.srcObject) {
+        try {
+          rtLoading.classList.remove("hidden");
+          document.getElementById("rt-loading-text").textContent = "カメラを起動中…";
+          await startCamera();
+          rtLoading.classList.add("hidden");
+        } catch (e) {
+          document.getElementById("rt-loading-text").textContent = "カメラの起動に失敗: " + e.message;
+          rtBtnStart.disabled = false;
+          return;
+        }
+      }
       rtMeasuring = true; rtStartTime = performance.now(); rtLastStateTime = performance.now();
       rtFrameTs = 0; rtLastVidTime = -1;
-      rtBtnStart.disabled = true; rtBtnStop.disabled = false; rtLoop();
+      rtBtnStop.disabled = false; rtLoop();
     });
     rtBtnStop.addEventListener("click", () => {
       rtMeasuring = false; if (rtAnimId) cancelAnimationFrame(rtAnimId);
@@ -1111,22 +1125,14 @@
     // ========== Init ==========
     async function init() {
       try {
-        await startCamera();
+        // Only load AI model on init, camera starts on button press
         await initMediaPipe("VIDEO");
         rtLoading.classList.add("hidden");
         rtBtnStart.disabled = false;
       } catch (err) {
-        rtLoading.querySelector(".loading-text").textContent =
-          "カメラまたはAIの読み込みに失敗: " + err.message;
+        document.getElementById("rt-loading-text").textContent =
+          "AIモデルの読み込みに失敗: " + err.message;
         console.error(err);
-        // Still try to init for upload mode
-        try {
-          await initMediaPipe("VIDEO");
-          rtLoading.querySelector(".loading-text").textContent =
-            "カメラが使用できません。動画アップロードモードをご利用ください。";
-        } catch (e2) {
-          console.error(e2);
-        }
       }
     }
     init();
