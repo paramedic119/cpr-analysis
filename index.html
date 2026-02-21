@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>CPR 胸骨圧迫 中断時間計測</title>
+  <meta name="description" content="AIを使って胸骨圧迫の中断時間をリアルタイムに計測するWebアプリ">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+  <style>
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg-primary: #0a0e17;
+      --bg-card: #141b2d;
+      --bg-card-alt: #1a2238;
+      --text-primary: #e8ecf4;
+      --text-secondary: #8892a4;
+      --accent-green: #00e676;
+      --accent-green-glow: rgba(0, 230, 118, 0.3);
+      --accent-red: #ff1744;
+      --accent-red-glow: rgba(255, 23, 68, 0.3);
+      --accent-blue: #448aff;
+      --accent-blue-glow: rgba(68, 138, 255, 0.2);
+      --accent-orange: #ff9100;
+      --border-color: #1e2a45;
+      --radius: 16px;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* --- Flash overlay --- */
+    #flash-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+      z-index: 1000;
+      opacity: 0;
+      background: radial-gradient(circle at center, rgba(255, 23, 68, 0.15), transparent 70%);
+      border: 4px solid transparent;
+      transition: opacity 0.3s, border-color 0.3s;
+    }
+
+    #flash-overlay.active {
+      opacity: 1;
+      border-color: var(--accent-red);
+      animation: pulse-border 1s infinite;
+    }
+
+    @keyframes pulse-border {
+
+      0%,
+      100% {
+        border-color: var(--accent-red);
+      }
+
+      50% {
+        border-color: rgba(255, 23, 68, 0.3);
+      }
+    }
+
+    /* --- Header --- */
+    .header {
+      text-align: center;
+      padding: 20px 16px 10px;
+    }
+
+    .header h1 {
+      font-size: 1.3rem;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #448aff, #00e676);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .header .subtitle {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      margin-top: 4px;
+    }
+
+    .container {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 0 12px 24px;
+    }
+
+    /* --- Mode Tabs --- */
+    .mode-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 14px;
+      background: var(--bg-card);
+      border-radius: 12px;
+      padding: 4px;
+      border: 1px solid var(--border-color);
+    }
+
+    .mode-tab {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: 10px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.85rem;
+      font-weight: 700;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text-secondary);
+      transition: all 0.25s;
+    }
+
+    .mode-tab.active {
+      background: linear-gradient(135deg, #1e3a5f, #1a2238);
+      color: var(--text-primary);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+
+    /* --- Mode Panels --- */
+    .mode-panel {
+      display: none;
+    }
+
+    .mode-panel.active {
+      display: block;
+    }
+
+    /* --- Video Section --- */
+    .video-wrapper {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4/3;
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #000;
+      margin-bottom: 12px;
+      border: 2px solid var(--border-color);
+      transition: border-color 0.3s;
+    }
+
+    .video-wrapper.interrupting {
+      border-color: var(--accent-red);
+      box-shadow: 0 0 30px var(--accent-red-glow);
+    }
+
+    .video-wrapper.compressing {
+      border-color: var(--accent-green);
+      box-shadow: 0 0 20px var(--accent-green-glow);
+    }
+
+    #camera-video,
+    #upload-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #camera-video {
+      transform: scaleX(-1);
+    }
+
+    .video-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 12px;
+      pointer-events: none;
+    }
+
+    /* --- Status Badge --- */
+    .status-badge {
+      align-self: flex-start;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 100px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      backdrop-filter: blur(12px);
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid transparent;
+      transition: all 0.3s;
+    }
+
+    .status-badge .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+
+    .status-badge.idle .dot {
+      background: var(--text-secondary);
+    }
+
+    .status-badge.compressing .dot {
+      background: var(--accent-green);
+      box-shadow: 0 0 8px var(--accent-green);
+    }
+
+    .status-badge.interrupting .dot {
+      background: var(--accent-red);
+      box-shadow: 0 0 8px var(--accent-red);
+      animation: blink 0.6s infinite;
+    }
+
+    .status-badge.analyzing .dot {
+      background: var(--accent-orange);
+      box-shadow: 0 0 8px var(--accent-orange);
+      animation: blink 1s infinite;
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: 0.3
+      }
+    }
+
+    /* --- Timer in video --- */
+    .timer-overlay {
+      align-self: center;
+      font-size: 2.5rem;
+      font-weight: 900;
+      color: white;
+      text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .timer-overlay.visible {
+      opacity: 1;
+    }
+
+    .timer-overlay.warning {
+      color: var(--accent-red);
+    }
+
+    /* --- Loading screen --- */
+    .loading-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: var(--bg-card);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 10;
+    }
+
+    .loading-screen.hidden {
+      display: none;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--border-color);
+      border-top-color: var(--accent-blue);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .loading-text {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      text-align: center;
+      padding: 0 20px;
+    }
+
+    /* --- Controls --- */
+    .controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 14px 20px;
+      border: none;
+      border-radius: 12px;
+      font-family: 'Inter', sans-serif;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn:active {
+      transform: scale(0.96);
+    }
+
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-start {
+      background: linear-gradient(135deg, #00c853, #00e676);
+      color: #0a0e17;
+    }
+
+    .btn-start:hover:not(:disabled) {
+      box-shadow: 0 4px 20px var(--accent-green-glow);
+    }
+
+    .btn-stop {
+      background: linear-gradient(135deg, #d50000, #ff1744);
+      color: white;
+    }
+
+    .btn-stop:hover:not(:disabled) {
+      box-shadow: 0 4px 20px var(--accent-red-glow);
+    }
+
+    .btn-reset {
+      background: var(--bg-card-alt);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-color);
+    }
+
+    .btn-upload {
+      background: linear-gradient(135deg, #2962ff, #448aff);
+      color: white;
+    }
+
+    .btn-upload:hover:not(:disabled) {
+      box-shadow: 0 4px 20px var(--accent-blue-glow);
+    }
+
+    /* --- Upload area --- */
+    .upload-area {
+      border: 2px dashed var(--border-color);
+      border-radius: var(--radius);
+      padding: 30px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.3s, background 0.3s;
+      margin-bottom: 12px;
+    }
+
+    .upload-area:hover {
+      border-color: var(--accent-blue);
+      background: var(--accent-blue-glow);
+    }
+
+    .upload-area .upload-icon {
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+    }
+
+    .upload-area .upload-text {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+    }
+
+    .upload-area .upload-text strong {
+      color: var(--text-primary);
+    }
+
+    #file-input {
+      display: none;
+    }
+
+    /* --- Progress bar --- */
+    .progress-wrapper {
+      margin-bottom: 12px;
+      display: none;
+    }
+
+    .progress-wrapper.active {
+      display: block;
+    }
+
+    .progress-label {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .progress-bar {
+      height: 6px;
+      border-radius: 3px;
+      background: var(--bg-card-alt);
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 3px;
+      width: 0%;
+      background: linear-gradient(90deg, #448aff, #00e676);
+      transition: width 0.2s;
+    }
+
+    /* --- Stats Cards --- */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      padding: 14px;
+      text-align: center;
+      transition: border-color 0.3s, box-shadow 0.3s;
+    }
+
+    .stat-card.highlight-red {
+      border-color: var(--accent-red);
+      box-shadow: 0 0 15px var(--accent-red-glow);
+    }
+
+    .stat-card .label {
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+
+    .stat-card .value {
+      font-size: 1.8rem;
+      font-weight: 900;
+    }
+
+    .stat-card .unit {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      margin-left: 2px;
+    }
+
+    /* --- Log --- */
+    .log-section {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+
+    .log-section h3 {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .log-list {
+      list-style: none;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .log-list li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 10px;
+      border-radius: 8px;
+      margin-bottom: 4px;
+      font-size: 0.85rem;
+      background: var(--bg-card-alt);
+    }
+
+    .log-list li:last-child {
+      margin-bottom: 0;
+    }
+
+    .log-list li .log-idx {
+      color: var(--text-secondary);
+      font-weight: 600;
+    }
+
+    .log-list li .log-time {
+      font-weight: 700;
+      color: var(--accent-red);
+      font-size: 1rem;
+    }
+
+    .log-list li .log-warn {
+      font-size: 0.7rem;
+      color: var(--accent-red);
+      background: var(--accent-red-glow);
+      padding: 2px 8px;
+      border-radius: 100px;
+    }
+
+    .log-list li .log-at {
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+    }
+
+    .log-empty {
+      text-align: center;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      padding: 20px 0;
+    }
+
+    /* --- Elapsed --- */
+    .elapsed-bar {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 6px;
+      padding: 8px;
+      margin-bottom: 12px;
+      border-radius: 10px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+
+    .elapsed-bar .elapsed-time {
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: var(--text-primary);
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="flash-overlay"></div>
+
+  <div class="header">
+    <h1>CPR 中断時間計測</h1>
+    <p class="subtitle">MediaPipe AI × リアルタイム骨格推定</p>
+  </div>
+
+  <div class="container">
+    <!-- Mode Tabs -->
+    <div class="mode-tabs">
+      <button class="mode-tab active" id="tab-realtime" data-mode="realtime">📹 リアルタイム</button>
+      <button class="mode-tab" id="tab-upload" data-mode="upload">📂 動画アップロード</button>
+    </div>
+
+    <!-- ===== REALTIME MODE ===== -->
+    <div class="mode-panel active" id="panel-realtime">
+      <div class="video-wrapper" id="rt-video-wrapper">
+        <video id="camera-video" autoplay playsinline muted></video>
+        <div class="loading-screen" id="rt-loading">
+          <div class="spinner"></div>
+          <div class="loading-text">AI モデルを読み込み中…</div>
+        </div>
+        <div class="video-overlay">
+          <div class="status-badge idle" id="rt-status-badge">
+            <span class="dot"></span>
+            <span id="rt-status-text">待機中</span>
+          </div>
+          <div class="timer-overlay" id="rt-int-timer">0.0</div>
+          <div></div>
+        </div>
+      </div>
+      <div class="elapsed-bar">
+        <span>⏱ 経過時間</span>
+        <span class="elapsed-time" id="rt-elapsed">00:00</span>
+      </div>
+      <div class="controls">
+        <button class="btn btn-start" id="rt-btn-start" disabled>▶ 計測開始</button>
+        <button class="btn btn-stop" id="rt-btn-stop" disabled>■ 停止</button>
+        <button class="btn btn-reset" id="rt-btn-reset">↺</button>
+      </div>
+      <div class="stats-grid" id="rt-stats">
+        <div class="stat-card" id="rt-card-count">
+          <div class="label">中断回数</div>
+          <div><span class="value" id="rt-stat-count">0</span><span class="unit">回</span></div>
+        </div>
+        <div class="stat-card" id="rt-card-total">
+          <div class="label">合計中断時間</div>
+          <div><span class="value" id="rt-stat-total">0.0</span><span class="unit">秒</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="label">最長中断</div>
+          <div><span class="value" id="rt-stat-longest">0.0</span><span class="unit">秒</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="label">圧迫率 (CCF)</div>
+          <div><span class="value" id="rt-stat-ccf">-</span><span class="unit">%</span></div>
+        </div>
+      </div>
+      <div class="log-section">
+        <h3>📋 中断ログ</h3>
+        <ul class="log-list" id="rt-log">
+          <li class="log-empty">まだ中断は記録されていません</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ===== UPLOAD MODE ===== -->
+    <div class="mode-panel" id="panel-upload">
+      <div class="upload-area" id="upload-area">
+        <div class="upload-icon">🎥</div>
+        <div class="upload-text"><strong>タップして動画を選択</strong><br>または訓練動画をここに配置</div>
+        <input type="file" id="file-input" accept="video/*">
+      </div>
+
+      <div class="video-wrapper" id="up-video-wrapper" style="display:none;">
+        <video id="upload-video" playsinline muted></video>
+        <div class="video-overlay">
+          <div class="status-badge idle" id="up-status-badge">
+            <span class="dot"></span>
+            <span id="up-status-text">待機中</span>
+          </div>
+          <div class="timer-overlay" id="up-int-timer">0.0</div>
+          <div></div>
+        </div>
+      </div>
+
+      <div class="progress-wrapper" id="up-progress">
+        <div class="progress-label">
+          <span id="up-progress-label">解析中…</span>
+          <span id="up-progress-pct">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="up-progress-fill"></div>
+        </div>
+      </div>
+
+      <div class="controls" id="up-controls">
+        <button class="btn btn-upload" id="up-btn-analyze" disabled>🔍 解析開始</button>
+        <button class="btn btn-reset" id="up-btn-reset">↺</button>
+      </div>
+
+      <div class="stats-grid" id="up-stats" style="display:none;">
+        <div class="stat-card" id="up-card-count">
+          <div class="label">中断回数</div>
+          <div><span class="value" id="up-stat-count">0</span><span class="unit">回</span></div>
+        </div>
+        <div class="stat-card" id="up-card-total">
+          <div class="label">合計中断時間</div>
+          <div><span class="value" id="up-stat-total">0.0</span><span class="unit">秒</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="label">最長中断</div>
+          <div><span class="value" id="up-stat-longest">0.0</span><span class="unit">秒</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="label">圧迫率 (CCF)</div>
+          <div><span class="value" id="up-stat-ccf">-</span><span class="unit">%</span></div>
+        </div>
+      </div>
+      <div class="log-section" id="up-log-section" style="display:none;">
+        <h3>📋 中断ログ</h3>
+        <ul class="log-list" id="up-log">
+          <li class="log-empty">まだ中断は記録されていません</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { FilesetResolver, PoseLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs";
+
+    // ========== Shared ==========
+    let poseLandmarker = null;
+    const WRIST_INDEX = 16; // RIGHT_WRIST
+
+    async function initMediaPipe(mode) {
+      if (poseLandmarker) {
+        await poseLandmarker.setOptions({ runningMode: mode });
+        return;
+      }
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      );
+      poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
+          delegate: "GPU"
+        },
+        runningMode: mode,
+        numPoses: 1
+      });
+    }
+
+    // ========== Tab Switching ==========
+    const tabs = document.querySelectorAll(".mode-tab");
+    const panels = document.querySelectorAll(".mode-panel");
+    tabs.forEach(tab => {
+      tab.addEventListener("click", () => {
+        tabs.forEach(t => t.classList.remove("active"));
+        panels.forEach(p => p.classList.remove("active"));
+        tab.classList.add("active");
+        document.getElementById("panel-" + tab.dataset.mode).classList.add("active");
+      });
+    });
+
+    // ========== REALTIME MODE ==========
+    const cameraVideo = document.getElementById("camera-video");
+    const rtLoading = document.getElementById("rt-loading");
+    const rtVideoWrapper = document.getElementById("rt-video-wrapper");
+    const rtStatusBadge = document.getElementById("rt-status-badge");
+    const rtStatusText = document.getElementById("rt-status-text");
+    const rtIntTimer = document.getElementById("rt-int-timer");
+    const flashOverlay = document.getElementById("flash-overlay");
+    const rtBtnStart = document.getElementById("rt-btn-start");
+    const rtBtnStop = document.getElementById("rt-btn-stop");
+    const rtBtnReset = document.getElementById("rt-btn-reset");
+    const rtElapsed = document.getElementById("rt-elapsed");
+    const rtStatCount = document.getElementById("rt-stat-count");
+    const rtStatTotal = document.getElementById("rt-stat-total");
+    const rtStatLongest = document.getElementById("rt-stat-longest");
+    const rtStatCCF = document.getElementById("rt-stat-ccf");
+    const rtCardTotal = document.getElementById("rt-card-total");
+    const rtLog = document.getElementById("rt-log");
+
+    let rtMeasuring = false, rtStartTime = 0, rtAnimId = null;
+    let rtYHistory = [], rtCompressing = false, rtIntStart = null, rtInterruptions = [];
+    let rtLastStateTime = 0;
+    const WINDOW = 20, THRESH = 0.015;
+
+    async function startCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false
+      });
+      cameraVideo.srcObject = stream;
+      await cameraVideo.play();
+    }
+
+    let rtLastVidTime = -1;
+    function rtLoop() {
+      if (!rtMeasuring) return;
+      if (cameraVideo.currentTime !== rtLastVidTime) {
+        rtLastVidTime = cameraVideo.currentTime;
+        const now = performance.now();
+        const res = poseLandmarker.detectForVideo(cameraVideo, now);
+        if (res?.landmarks?.length > 0) {
+          rtProcess(res.landmarks[0][WRIST_INDEX].y, now);
+        } else {
+          rtProcess(null, now);
+        }
+      }
+      rtAnimId = requestAnimationFrame(rtLoop);
+    }
+
+    function rtProcess(wy, ts) {
+      if (wy !== null) rtYHistory.push(wy);
+      while (rtYHistory.length > WINDOW * 2) rtYHistory.shift();
+      if (rtYHistory.length < WINDOW) return;
+      const win = rtYHistory.slice(-WINDOW);
+      const mov = Math.max(...win) - Math.min(...win);
+      const comp = mov > THRESH;
+
+      if (rtCompressing && !comp) { rtIntStart = ts; rtLastStateTime = ts; }
+      else if (!rtCompressing && comp && rtIntStart !== null) {
+        const dur = (ts - rtIntStart) / 1000;
+        if (dur >= 1.0) { rtInterruptions.push({ duration: dur, at: (rtIntStart - rtStartTime) / 1000 }); addLog(rtLog, rtInterruptions.length, dur, (rtIntStart - rtStartTime) / 1000); }
+        rtIntStart = null; rtLastStateTime = ts;
+      }
+      rtCompressing = comp;
+      rtUpdateUI(comp, ts);
+    }
+
+    function rtUpdateUI(comp, ts) {
+      const elapsed = ts - rtStartTime;
+      // Status
+      if (comp) {
+        rtStatusBadge.className = "status-badge compressing"; rtStatusText.textContent = "圧迫中";
+        rtVideoWrapper.className = "video-wrapper compressing";
+        rtIntTimer.classList.remove("visible", "warning"); flashOverlay.classList.remove("active");
+      } else if (rtIntStart !== null) {
+        const d = (ts - rtIntStart) / 1000;
+        rtStatusBadge.className = "status-badge interrupting"; rtStatusText.textContent = "中断中";
+        rtVideoWrapper.className = "video-wrapper interrupting";
+        rtIntTimer.textContent = d.toFixed(1); rtIntTimer.classList.add("visible");
+        if (d >= 10) { rtIntTimer.classList.add("warning"); flashOverlay.classList.add("active"); }
+      } else {
+        rtStatusBadge.className = "status-badge idle"; rtStatusText.textContent = "検出待ち";
+        rtVideoWrapper.className = "video-wrapper";
+        rtIntTimer.classList.remove("visible", "warning"); flashOverlay.classList.remove("active");
+      }
+      // Stats
+      const finTotal = rtInterruptions.reduce((s, i) => s + i.duration, 0);
+      let curInt = rtIntStart ? Math.max(0, (ts - rtIntStart) / 1000) : 0;
+      const total = finTotal + (curInt >= 1 ? curInt : 0);
+      rtStatCount.textContent = rtInterruptions.length + (curInt >= 1 ? 1 : 0);
+      rtStatTotal.textContent = total.toFixed(1);
+      const longest = rtInterruptions.length ? Math.max(...rtInterruptions.map(i => i.duration)) : 0;
+      rtStatLongest.textContent = Math.max(longest, curInt >= 1 ? curInt : 0).toFixed(1);
+      const elSec = elapsed / 1000;
+      if (elSec > 2) rtStatCCF.textContent = Math.round(Math.max(0, (elSec - total) / elSec * 100));
+      if (total > 10) rtCardTotal.classList.add("highlight-red"); else rtCardTotal.classList.remove("highlight-red");
+      // Elapsed
+      const s = Math.floor(elSec);
+      rtElapsed.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+    }
+
+    rtBtnStart.addEventListener("click", () => {
+      rtMeasuring = true; rtStartTime = performance.now(); rtLastStateTime = performance.now();
+      rtBtnStart.disabled = true; rtBtnStop.disabled = false; rtLoop();
+    });
+    rtBtnStop.addEventListener("click", () => {
+      rtMeasuring = false; if (rtAnimId) cancelAnimationFrame(rtAnimId);
+      if (rtIntStart) { const d = (performance.now() - rtIntStart) / 1000; if (d >= 1) { rtInterruptions.push({ duration: d, at: (rtIntStart - rtStartTime) / 1000 }); addLog(rtLog, rtInterruptions.length, d, (rtIntStart - rtStartTime) / 1000); } rtIntStart = null; }
+      rtBtnStart.disabled = false; rtBtnStop.disabled = true;
+      rtUpdateUI(false, performance.now());
+      rtStatusBadge.className = "status-badge idle"; rtStatusText.textContent = "停止中";
+      rtVideoWrapper.className = "video-wrapper";
+      rtIntTimer.classList.remove("visible", "warning"); flashOverlay.classList.remove("active");
+    });
+    rtBtnReset.addEventListener("click", () => {
+      rtMeasuring = false; if (rtAnimId) cancelAnimationFrame(rtAnimId);
+      rtYHistory.length = 0; rtInterruptions = []; rtIntStart = null; rtCompressing = false; rtLastStateTime = 0; rtStartTime = 0;
+      rtStatCount.textContent = "0"; rtStatTotal.textContent = "0.0"; rtStatLongest.textContent = "0.0"; rtStatCCF.textContent = "-"; rtElapsed.textContent = "00:00";
+      rtLog.innerHTML = '<li class="log-empty">まだ中断は記録されていません</li>';
+      rtStatusBadge.className = "status-badge idle"; rtStatusText.textContent = "待機中";
+      rtVideoWrapper.className = "video-wrapper";
+      rtIntTimer.classList.remove("visible", "warning"); flashOverlay.classList.remove("active");
+      rtCardTotal.classList.remove("highlight-red");
+      rtBtnStart.disabled = false; rtBtnStop.disabled = true;
+    });
+
+    // ========== UPLOAD MODE ==========
+    const uploadArea = document.getElementById("upload-area");
+    const fileInput = document.getElementById("file-input");
+    const uploadVideo = document.getElementById("upload-video");
+    const upVideoWrapper = document.getElementById("up-video-wrapper");
+    const upStatusBadge = document.getElementById("up-status-badge");
+    const upStatusText = document.getElementById("up-status-text");
+    const upIntTimer = document.getElementById("up-int-timer");
+    const upBtnAnalyze = document.getElementById("up-btn-analyze");
+    const upBtnReset = document.getElementById("up-btn-reset");
+    const upProgress = document.getElementById("up-progress");
+    const upProgressLabel = document.getElementById("up-progress-label");
+    const upProgressPct = document.getElementById("up-progress-pct");
+    const upProgressFill = document.getElementById("up-progress-fill");
+    const upStats = document.getElementById("up-stats");
+    const upLogSection = document.getElementById("up-log-section");
+    const upStatCount = document.getElementById("up-stat-count");
+    const upStatTotal = document.getElementById("up-stat-total");
+    const upStatLongest = document.getElementById("up-stat-longest");
+    const upStatCCF = document.getElementById("up-stat-ccf");
+    const upCardTotal = document.getElementById("up-card-total");
+    const upLog = document.getElementById("up-log");
+
+    let upAnalyzing = false;
+
+    uploadArea.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", (e) => {
+      if (e.target.files.length > 0) loadVideo(e.target.files[0]);
+    });
+
+    function loadVideo(file) {
+      const url = URL.createObjectURL(file);
+      uploadVideo.src = url;
+      uploadVideo.load();
+      upVideoWrapper.style.display = "";
+      uploadArea.style.display = "none";
+      upBtnAnalyze.disabled = false;
+      // Reset results
+      upStats.style.display = "none";
+      upLogSection.style.display = "none";
+    }
+
+    upBtnAnalyze.addEventListener("click", async () => {
+      if (upAnalyzing) return;
+      upAnalyzing = true;
+      upBtnAnalyze.disabled = true;
+      upProgress.classList.add("active");
+      upStats.style.display = "grid";
+      upLogSection.style.display = "";
+      upLog.innerHTML = '<li class="log-empty">解析中…</li>';
+
+      await initMediaPipe("VIDEO");
+
+      // Seek through video frame by frame
+      const video = uploadVideo;
+      await new Promise(r => { video.currentTime = 0; video.onseeked = r; });
+
+      const fps = 15; // sample at 15fps for speed
+      const duration = video.duration;
+      const totalFrames = Math.floor(duration * fps);
+      const yCoords = [];
+      const timestamps = [];
+
+      upStatusBadge.className = "status-badge analyzing";
+      upStatusText.textContent = "解析中…";
+
+      for (let i = 0; i <= totalFrames; i++) {
+        const t = i / fps;
+        if (t > duration) break;
+
+        video.currentTime = t;
+        await new Promise(r => { video.onseeked = r; });
+
+        const tsMs = t * 1000;
+        const res = poseLandmarker.detectForVideo(video, tsMs);
+
+        if (res?.landmarks?.length > 0) {
+          yCoords.push(res.landmarks[0][WRIST_INDEX].y);
+        } else {
+          yCoords.push(null);
+        }
+        timestamps.push(t);
+
+        // Progress
+        const pct = Math.round((i / totalFrames) * 100);
+        upProgressPct.textContent = pct + "%";
+        upProgressFill.style.width = pct + "%";
+        upProgressLabel.textContent = `解析中… ${t.toFixed(1)}s / ${duration.toFixed(1)}s`;
+
+        // Yield to UI
+        if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
+      }
+
+      // Analyze
+      const windowSize = Math.max(Math.floor(fps * 0.8), 5);
+      const interruptions = [];
+      let isComp = false, intStartIdx = -1;
+
+      for (let i = 0; i <= yCoords.length - windowSize; i++) {
+        const win = yCoords.slice(i, i + windowSize).filter(v => v !== null);
+        let comp = false;
+        if (win.length >= windowSize * 0.5) {
+          const mov = Math.max(...win) - Math.min(...win);
+          comp = mov > THRESH;
+        }
+
+        if (isComp && !comp) { intStartIdx = i; }
+        else if (!isComp && comp && intStartIdx >= 0) {
+          const dur = timestamps[i] - timestamps[intStartIdx];
+          if (dur >= 1.0) interruptions.push({ duration: dur, at: timestamps[intStartIdx] });
+          intStartIdx = -1;
+        }
+        isComp = comp;
+      }
+      // trailing interruption
+      if (!isComp && intStartIdx >= 0) {
+        const dur = timestamps[timestamps.length - 1] - timestamps[intStartIdx];
+        if (dur >= 1.0) interruptions.push({ duration: dur, at: timestamps[intStartIdx] });
+      }
+
+      // Display results
+      upLog.innerHTML = "";
+      if (interruptions.length === 0) {
+        upLog.innerHTML = '<li class="log-empty">中断は検出されませんでした 🎉</li>';
+      } else {
+        interruptions.forEach((int, idx) => addLog(upLog, idx + 1, int.duration, int.at));
+      }
+
+      const totalInt = interruptions.reduce((s, i) => s + i.duration, 0);
+      upStatCount.textContent = interruptions.length;
+      upStatTotal.textContent = totalInt.toFixed(1);
+      upStatLongest.textContent = interruptions.length ? Math.max(...interruptions.map(i => i.duration)).toFixed(1) : "0.0";
+      upStatCCF.textContent = duration > 0 ? Math.round(Math.max(0, (duration - totalInt) / duration * 100)) : "-";
+      if (totalInt > 10) upCardTotal.classList.add("highlight-red"); else upCardTotal.classList.remove("highlight-red");
+
+      upProgressLabel.textContent = "解析完了！";
+      upProgressPct.textContent = "100%";
+      upProgressFill.style.width = "100%";
+      upStatusBadge.className = "status-badge idle";
+      upStatusText.textContent = "完了";
+      upAnalyzing = false;
+    });
+
+    upBtnReset.addEventListener("click", () => {
+      upAnalyzing = false;
+      uploadVideo.src = ""; uploadVideo.load();
+      upVideoWrapper.style.display = "none"; uploadArea.style.display = "";
+      upProgress.classList.remove("active"); upProgressFill.style.width = "0%";
+      upStats.style.display = "none"; upLogSection.style.display = "none";
+      upBtnAnalyze.disabled = true;
+      upStatCount.textContent = "0"; upStatTotal.textContent = "0.0"; upStatLongest.textContent = "0.0"; upStatCCF.textContent = "-";
+      upLog.innerHTML = '<li class="log-empty">まだ中断は記録されていません</li>';
+      upStatusBadge.className = "status-badge idle"; upStatusText.textContent = "待機中";
+      upCardTotal.classList.remove("highlight-red");
+      fileInput.value = "";
+    });
+
+    // ========== Shared Log Helper ==========
+    function addLog(listEl, idx, duration, atSec) {
+      const empty = listEl.querySelector(".log-empty");
+      if (empty) empty.remove();
+      const li = document.createElement("li");
+      const atStr = `${String(Math.floor(atSec / 60)).padStart(2, "0")}:${String(Math.floor(atSec % 60)).padStart(2, "0")}`;
+      li.innerHTML = `
+      <span class="log-idx">#${idx}</span>
+      <span class="log-at">@ ${atStr}</span>
+      <span class="log-time">${duration.toFixed(2)} 秒</span>
+      ${duration >= 10 ? '<span class="log-warn">⚠ 10秒超</span>' : ""}
+    `;
+      listEl.appendChild(li);
+    }
+
+    // ========== Init ==========
+    async function init() {
+      try {
+        await startCamera();
+        await initMediaPipe("VIDEO");
+        rtLoading.classList.add("hidden");
+        rtBtnStart.disabled = false;
+      } catch (err) {
+        rtLoading.querySelector(".loading-text").textContent =
+          "カメラまたはAIの読み込みに失敗: " + err.message;
+        console.error(err);
+        // Still try to init for upload mode
+        try {
+          await initMediaPipe("VIDEO");
+          rtLoading.querySelector(".loading-text").textContent =
+            "カメラが使用できません。動画アップロードモードをご利用ください。";
+        } catch (e2) {
+          console.error(e2);
+        }
+      }
+    }
+    init();
+  </script>
+</body>
+
+</html>
