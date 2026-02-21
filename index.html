@@ -1547,48 +1547,26 @@
       const outFps = 10; // Match analysis FPS for better sync
       const duration = analysis.duration;
       const totalFrames = Math.floor(duration * outFps);
+      const frameInterval = 1000 / outFps; // 100ms per frame for 10fps
 
-      // MediaRecorder setup
-      const stream = canvas.captureStream(0);
-      const mimeTypes = [
-        'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
-        'video/mp4;codecs=avc1',
-        'video/mp4',
-        'video/webm;codecs=vp9',
-        'video/webm;codecs=vp8',
-        'video/webm'
-      ];
-      let mimeType = '';
-      for (const mt of mimeTypes) {
-        if (MediaRecorder.isTypeSupported(mt)) { mimeType = mt; break; }
-      }
-      if (!mimeType) mimeType = '';
-      const recorderOpts = { videoBitsPerSecond: 4000000 };
-      if (mimeType) recorderOpts.mimeType = mimeType;
-      const recorder = new MediaRecorder(stream, recorderOpts);
-      const chunks = [];
-      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      // ----- Phase 1: Pre-render all frames -----
+      genProgressLabel.textContent = "フレームを準備中…";
 
-      const recorderReady = new Promise(resolve => {
-        recorder.onstop = resolve;
-      });
-      recorder.start();
-
-      // Better Seek helper
+      // Seek helper (fast, minimal delay)
       function waitSeek(v, t) {
         return new Promise(resolve => {
           const onS = () => {
             v.removeEventListener("seeked", onS);
-            // Give extra time for buffer update
-            setTimeout(resolve, 100);
+            setTimeout(resolve, 30);
           };
           v.addEventListener("seeked", onS);
           v.currentTime = t;
-          // Fallback
-          setTimeout(() => { v.removeEventListener("seeked", onS); resolve(); }, 600);
+          setTimeout(() => { v.removeEventListener("seeked", onS); resolve(); }, 500);
         });
       }
 
+      // Pre-render frames as ImageBitmap for consistent timing
+      const renderedFrames = [];
       for (let i = 0; i <= totalFrames; i++) {
         const t = i / outFps;
         if (t > duration) break;
@@ -1619,7 +1597,7 @@
           }
         }
 
-        // --- Draw telop overlays (Enlarged) ---
+        // --- Draw telop overlays ---
         const scale = vw / 640;
 
         // Status badge
@@ -1685,20 +1663,74 @@
         ctx.fillText(`CCF: ${ccf}%`, 500 * scale, barMid);
         ctx.restore();
 
-        // Capture this frame correctly
+        // Save rendered frame as ImageBitmap
+        const bitmap = await createImageBitmap(canvas);
+        renderedFrames.push(bitmap);
+
+        // Progress (phase 1)
+        const pct = Math.round((i / totalFrames) * 50); // 0-50%
+        genProgressPct.textContent = pct + "%";
+        genProgressFill.style.width = pct + "%";
+        genProgressLabel.textContent = `フレーム準備中… ${i + 1}/${totalFrames + 1}`;
+
+        if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
+      }
+
+      // ----- Phase 2: Play back frames at constant FPS for recording -----
+      genProgressLabel.textContent = "動画をエンコード中…";
+
+      // MediaRecorder setup
+      const stream = canvas.captureStream(0);
+      const mimeTypes = [
+        'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+        'video/mp4;codecs=avc1',
+        'video/mp4',
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm'
+      ];
+      let mimeType = '';
+      for (const mt of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mt)) { mimeType = mt; break; }
+      }
+      if (!mimeType) mimeType = '';
+      const recorderOpts = { videoBitsPerSecond: 4000000 };
+      if (mimeType) recorderOpts.mimeType = mimeType;
+      const recorder = new MediaRecorder(stream, recorderOpts);
+      const chunks = [];
+      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+      const recorderReady = new Promise(resolve => {
+        recorder.onstop = resolve;
+      });
+      recorder.start();
+
+      // Play back pre-rendered frames at exact intervals
+      for (let i = 0; i < renderedFrames.length; i++) {
+        const frameStart = performance.now();
+
+        // Draw pre-rendered frame
+        ctx.drawImage(renderedFrames[i], 0, 0);
+
+        // Send frame to recorder
         if (stream.getTracks()[0].requestFrame) {
           stream.getTracks()[0].requestFrame();
         }
 
-        // Progress
-        const pct = Math.round((i / totalFrames) * 100);
+        // Progress (phase 2: 50-100%)
+        const pct = 50 + Math.round((i / renderedFrames.length) * 50);
         genProgressPct.textContent = pct + "%";
         genProgressFill.style.width = pct + "%";
-        genProgressLabel.textContent = `動画生成中… ${t.toFixed(1)}s / ${duration.toFixed(1)}s`;
+        genProgressLabel.textContent = `動画エンコード中… ${i + 1}/${renderedFrames.length}`;
 
-        // Small pause to allow UI update and recorder capture
-        await new Promise(r => setTimeout(r, 50));
+        // Wait exactly frameInterval ms to maintain constant FPS
+        const elapsed = performance.now() - frameStart;
+        const waitTime = Math.max(0, frameInterval - elapsed);
+        await new Promise(r => setTimeout(r, waitTime));
       }
+
+      // Clean up bitmaps
+      renderedFrames.forEach(bm => bm.close());
 
       recorder.stop();
       await recorderReady;
