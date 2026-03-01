@@ -1,9 +1,17 @@
 importScripts("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.1/vision_bundle.js");
-const { FilesetResolver, PoseLandmarker } = vision;
+
+console.log("Worker Globals:", Object.keys(self).filter(k => !k.startsWith("webkit") && !k.startsWith("moz")));
+
+// Extract globals from MediaPipe bundle
+const FilesetResolver = self.FilesetResolver || (self.vision && self.vision.FilesetResolver);
+const PoseLandmarker = self.PoseLandmarker || (self.vision && self.vision.PoseLandmarker);
+
+console.log("Detected FilesetResolver:", !!FilesetResolver);
+console.log("Detected PoseLandmarker:", !!PoseLandmarker);
 
 let poseLandmarker = null;
 let currentModelType = null;
-let vision = null;
+let visionInstance = null; // Renamed from 'vision' to avoid conflict
 
 const MODEL_URLS = {
   lite: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
@@ -80,8 +88,8 @@ async function initPoseLandmarker(runningMode, modelType) {
     poseLandmarker = null;
   }
 
-  if (!vision) {
-    vision = await FilesetResolver.forVisionTasks(
+  if (!visionInstance) {
+    visionInstance = await FilesetResolver.forVisionTasks(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.1/wasm"
     );
   }
@@ -93,7 +101,7 @@ async function initPoseLandmarker(runningMode, modelType) {
   console.log(`Initializing PoseLandmarker for ${modelType} (runningMode: ${runningMode})`);
   try {
     console.log("Attempting GPU delegate...");
-    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+    poseLandmarker = await PoseLandmarker.createFromOptions(visionInstance, {
       baseOptions: {
         modelAssetBuffer: buffer,
         delegate: "GPU"
@@ -105,7 +113,7 @@ async function initPoseLandmarker(runningMode, modelType) {
   } catch (gpuErr) {
     console.warn("GPU delegate failed, falling back to CPU", gpuErr);
     console.log("Attempting CPU delegate...");
-    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+    poseLandmarker = await PoseLandmarker.createFromOptions(visionInstance, {
       baseOptions: {
         modelAssetBuffer: buffer,
         delegate: "CPU"
