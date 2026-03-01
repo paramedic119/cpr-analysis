@@ -46,17 +46,24 @@ async function cacheModel(type, buffer) {
 }
 
 async function loadModel(type) {
+  console.log(`loadModel(${type}) start`);
   let buffer = await getCachedModel(type);
   if (!buffer) {
+    console.log(`Model cache miss for ${type}`);
     self.postMessage({ type: "progress", message: `AIモデル(${type})をダウンロード中...` });
     const res = await fetch(MODEL_URLS[type]);
     if (!res.ok) throw new Error("モデルのダウンロードに失敗しました");
     buffer = await res.arrayBuffer();
     await cacheModel(type, buffer);
+    console.log(`Model ${type} downloaded and cached`);
   } else {
+    console.log(`Model cache hit for ${type}, size: ${buffer.byteLength}`);
     self.postMessage({ type: "progress", message: `AIモデル(${type})をローカルから展開中...` });
   }
-  return new Uint8Array(buffer);
+  console.log(`Converting buffer to Uint8Array for ${type}`);
+  const uint8 = new Uint8Array(buffer);
+  console.log(`Conversion done for ${type}`);
+  return uint8;
 }
 
 async function initPoseLandmarker(runningMode, modelType) {
@@ -78,10 +85,13 @@ async function initPoseLandmarker(runningMode, modelType) {
     );
   }
 
+  console.log("Loading model buffer...");
   const buffer = await loadModel(modelType);
   currentModelType = modelType;
 
+  console.log(`Initializing PoseLandmarker for ${modelType} (runningMode: ${runningMode})`);
   try {
+    console.log("Attempting GPU delegate...");
     poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
       baseOptions: {
         modelAssetBuffer: buffer,
@@ -90,8 +100,10 @@ async function initPoseLandmarker(runningMode, modelType) {
       runningMode: runningMode,
       numPoses: 1
     });
+    console.log("GPU initialization successful");
   } catch (gpuErr) {
     console.warn("GPU delegate failed, falling back to CPU", gpuErr);
+    console.log("Attempting CPU delegate...");
     poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
       baseOptions: {
         modelAssetBuffer: buffer,
@@ -100,6 +112,7 @@ async function initPoseLandmarker(runningMode, modelType) {
       runningMode: runningMode,
       numPoses: 1
     });
+    console.log("CPU initialization successful");
   }
 }
 
