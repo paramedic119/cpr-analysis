@@ -1,4 +1,5 @@
-import { FilesetResolver, PoseLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.15/vision_bundle.mjs";
+importScripts("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.1/vision_bundle.js");
+const { FilesetResolver, PoseLandmarker } = vision;
 
 let poseLandmarker = null;
 let currentModelType = null;
@@ -81,7 +82,7 @@ async function initPoseLandmarker(runningMode, modelType) {
 
   if (!vision) {
     vision = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.15/wasm"
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.1/wasm"
     );
   }
 
