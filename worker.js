@@ -121,12 +121,12 @@ self.onmessage = async (e) => {
     const { imageBitmap, timestamp, frameId } = payload;
     try {
       const results = poseLandmarker.detectForVideo(imageBitmap, timestamp);
-      
+
       let wy = null;
       if (results && results.landmarks && results.landmarks.length > 0) {
-         wy = results.landmarks[0][12].y; // RIGHT_SHOULDER
+        wy = results.landmarks[0][12].y; // RIGHT_SHOULDER
       }
-      
+
       self.postMessage({
         type: "detect_result",
         payload: { wy, timestamp, frameId }

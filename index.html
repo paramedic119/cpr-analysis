@@ -948,11 +948,17 @@
 
     // Detect rhythmic oscillation (CPR = 100-120/min = ~2Hz)
     function detectCPR(yArray) {
-      if (yArray.length < 10) return false; const minY = Math.min(...yArray); const maxY = Math.max(...yArray); const
-        amplitude = maxY - minY; if (amplitude < 0.02) return false; let directionChanges = 0; let prevDir = 0; for (let i = 1; i <
-          yArray.length; i++) {
-        const diff = yArray[i] - yArray[i - 1]; if (Math.abs(diff) < 0.002) continue; const dir = diff > 0
-          ? 1 : -1;
+      if (yArray.length < 10) return false;
+      const minY = Math.min(...yArray);
+      const maxY = Math.max(...yArray);
+      const amplitude = maxY - minY;
+      if (amplitude < 0.02) return false;
+      let directionChanges = 0;
+      let prevDir = 0;
+      for (let i = 1; i < yArray.length; i++) {
+        const diff = yArray[i] - yArray[i - 1];
+        if (Math.abs(diff) < 0.002) continue;
+        const dir = diff > 0 ? 1 : -1;
         if (prevDir !== 0 && dir !== prevDir) {
           directionChanges++;
         }
@@ -978,47 +984,6 @@
     let rtInterruptions = [];
     let rtAnimId = null;
 
-    async function initMediaPipe(mode, modelType = "lite") {
-      const needNewModel = !poseLandmarker || currentModelType !== modelType;
-
-      if (poseLandmarker && !needNewModel) {
-        await poseLandmarker.setOptions({ runningMode: mode });
-        return;
-      }
-
-      // 既存のモデルを破棄
-      if (poseLandmarker) {
-        poseLandmarker.close();
-        poseLandmarker = null;
-      }
-      currentModelType = modelType;
-      const modelPath = MODEL_PATHS[modelType];
-
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-      );
-      // GPU delegate → CPU fallback (iOS Safari does not support GPU delegate)
-      try {
-        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: modelPath,
-            delegate: "GPU"
-          },
-          runningMode: mode,
-          numPoses: 1
-        });
-      } catch (gpuErr) {
-        console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
-        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: modelPath,
-            delegate: "CPU"
-          },
-          runningMode: mode,
-          numPoses: 1
-        });
-      }
-    }
 
     // ========== Tab Switching ==========
     const tabs = document.querySelectorAll(".mode-tab");
@@ -1132,17 +1097,23 @@
     function rtProcess(wy, ts) {
       if (wy !== null) rtYHistory.push(wy);
       while (rtYHistory.length > WINDOW * 3) rtYHistory.shift();
-      if (rtYHistory.length < WINDOW) return; const win = rtYHistory.slice(-WINDOW); const comp = detectCPR(win); if
-        (rtCompressing && !comp) { rtIntStart = ts; rtLastStateTime = ts; } else if (!rtCompressing && comp && rtIntStart
-          !== null) {
-        const dur = (ts - rtIntStart) / 1000; if (dur >= 1.0) {
+      if (rtYHistory.length < WINDOW) return;
+      const win = rtYHistory.slice(-WINDOW);
+      const comp = detectCPR(win);
+      if (rtCompressing && !comp) {
+        rtIntStart = ts;
+        rtLastStateTime = ts;
+      } else if (!rtCompressing && comp && rtIntStart !== null) {
+        const dur = (ts - rtIntStart) / 1000;
+        if (dur >= 1.0) {
           rtInterruptions.push({
-            duration: dur, at:
-              (rtIntStart - rtStartTime) / 1000
-          }); addLog(rtLog, rtInterruptions.length, dur, (rtIntStart - rtStartTime) /
-            1000);
+            duration: dur,
+            at: (rtIntStart - rtStartTime) / 1000
+          });
+          addLog(rtLog, rtInterruptions.length, dur, (rtIntStart - rtStartTime) / 1000);
         }
-        rtIntStart = null; rtLastStateTime = ts;
+        rtIntStart = null;
+        rtLastStateTime = ts;
       }
       rtCompressing = comp;
       rtUpdateUI(comp, ts);
@@ -1154,19 +1125,28 @@
       const elapsed = ts - rtStartTime;
       // Status
       if (comp) {
-        rtStatusBadge.className = "status-badge compressing"; rtStatusText.textContent = "圧迫中";
+        rtStatusBadge.className = "status-badge compressing";
+        rtStatusText.textContent = "圧迫中";
         rtVideoWrapper.className = "video-wrapper compressing";
-        rtIntTimer.classList.remove("visible", "warning"); flashOverlay.classList.remove("active");
+        rtIntTimer.classList.remove("visible", "warning");
+        flashOverlay.classList.remove("active");
       } else if (rtIntStart !== null) {
         const d = (ts - rtIntStart) / 1000;
-        rtStatusBadge.className = "status-badge interrupting"; rtStatusText.textContent = "中断中";
+        rtStatusBadge.className = "status-badge interrupting";
+        rtStatusText.textContent = "中断中";
         rtVideoWrapper.className = "video-wrapper interrupting";
-        rtIntTimer.textContent = d.toFixed(1); rtIntTimer.classList.add("visible");
-        if (d >= 10) { rtIntTimer.classList.add("warning"); flashOverlay.classList.add("active"); }
+        rtIntTimer.textContent = d.toFixed(1);
+        rtIntTimer.classList.add("visible");
+        if (d >= 10) {
+          rtIntTimer.classList.add("warning");
+          flashOverlay.classList.add("active");
+        }
       } else {
-        rtStatusBadge.className = "status-badge idle"; rtStatusText.textContent = "検出待ち";
+        rtStatusBadge.className = "status-badge idle";
+        rtStatusText.textContent = "検出待ち";
         rtVideoWrapper.className = "video-wrapper";
-        rtIntTimer.classList.remove("visible", "warning"); flashOverlay.classList.remove("active");
+        rtIntTimer.classList.remove("visible", "warning");
+        flashOverlay.classList.remove("active");
       }
       // Stats
       const finTotal = rtInterruptions.reduce((s, i) => s + i.duration, 0);
@@ -1178,7 +1158,8 @@
       rtStatLongest.textContent = Math.max(longest, curInt >= 1 ? curInt : 0).toFixed(1);
       const elSec = elapsed / 1000;
       if (elSec > 2) rtStatCCF.textContent = Math.round(Math.max(0, (elSec - total) / elSec * 100));
-      if (total > 10) rtCardTotal.classList.add("highlight-red"); else rtCardTotal.classList.remove("highlight-red");
+      if (total > 10) rtCardTotal.classList.add("highlight-red");
+      else rtCardTotal.classList.remove("highlight-red");
       // Elapsed
       const s = Math.floor(elSec);
       rtElapsed.textContent = `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -1419,17 +1400,19 @@
       let isComp = false, intStartIdx = -1;
 
       for (let i = 0; i <= yCoords.length - windowSize; i++) {
-        const win = yCoords.slice(i, i + windowSize).filter(v =>
-          v !== null);
+        const win = yCoords.slice(i, i + windowSize).filter(v => v !== null);
         let comp = false;
         if (win.length >= windowSize * 0.5) {
           comp = detectCPR(win);
         }
 
-        if (isComp && !comp) { intStartIdx = i; }
-        else if (!isComp && comp && intStartIdx >= 0) {
+        if (isComp && !comp) {
+          intStartIdx = i;
+        } else if (!isComp && comp && intStartIdx >= 0) {
           const dur = timestamps[i] - timestamps[intStartIdx];
-          if (dur >= 1.0) interruptions.push({ duration: dur, at: timestamps[intStartIdx] });
+          if (dur >= 1.0) {
+            interruptions.push({ duration: dur, at: timestamps[intStartIdx] });
+          }
           intStartIdx = -1;
         }
         isComp = comp;
@@ -1468,14 +1451,17 @@
       // Build per-frame status map for telop generation
       const frameStatusMap = [];
       for (let i = 0; i < timestamps.length; i++) {
-        const t = timestamps[i]; // Find if this time falls within any
-              interruption let status = "compressing"; let intDuration = 0; for (const intItem of interruptions) {
-          if (t >=
-            intItem.at && t < intItem.at + intItem.duration) {
+        // Find if this time falls within any interruption
+        let status = "compressing";
+        let intDuration = 0;
+        for (const intItem of interruptions) {
+          if (t >= intItem.at && t < intItem.at + intItem.duration) {
             status = "interrupting"; intDuration = t - intItem.at;
             break;
           }
-        } // Before first compression detected, show idle if (i < windowSize) status="detecting" ;
+        }
+        // Before first compression detected, show idle
+        if (i < windowSize) status = "detecting";
         frameStatusMap.push({ time: t, status, intDuration });
       } // Store analysis data for video generation
       window._cprAnalysis = {
