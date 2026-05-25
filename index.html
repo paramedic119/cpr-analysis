@@ -678,6 +678,121 @@
       color: #e1bee7;
     }
 
+    /* --- Debug Mode --- */
+    .dbg-section {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .dbg-section-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+      letter-spacing: 0.05em;
+    }
+    .dbg-status-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .dbg-stat {
+      background: var(--bg-card-alt);
+      padding: 8px 6px;
+      border-radius: 8px;
+      text-align: center;
+    }
+    .dbg-stat-label {
+      font-size: 0.65rem;
+      color: var(--text-secondary);
+    }
+    .dbg-stat-value {
+      font-size: 1.05rem;
+      font-weight: 800;
+      margin-top: 2px;
+    }
+    .dbg-conditions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .dbg-cond {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      border-radius: 100px;
+      background: var(--bg-card-alt);
+      color: var(--text-secondary);
+    }
+    .dbg-cond.met {
+      color: var(--accent-green);
+    }
+    .dbg-cond-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #444;
+    }
+    .dbg-cond.met .dbg-cond-dot {
+      background: var(--accent-green);
+      box-shadow: 0 0 6px var(--accent-green-glow);
+    }
+    .dbg-reason {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      padding: 6px 10px;
+      background: var(--bg-card-alt);
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+    .dbg-canvas {
+      width: 100%;
+      height: 180px;
+      background: #050810;
+      border-radius: 10px;
+      display: block;
+    }
+    .dbg-sliders {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .dbg-slider {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+    }
+    .dbg-slider b {
+      color: var(--accent-blue);
+      font-weight: 700;
+    }
+    .dbg-slider input[type=range] {
+      width: 100%;
+      accent-color: var(--accent-blue);
+    }
+    #dbg-replay-summary {
+      background: var(--bg-card-alt);
+      padding: 10px;
+      border-radius: 8px;
+      margin-top: 10px;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    #dbg-timeline-legend {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      margin-top: 6px;
+      text-align: center;
+    }
+
     /* --- PC Layout --- */
     @media (min-width: 768px) {
       .container {
@@ -736,6 +851,7 @@
     <div class="mode-tabs">
       <button class="mode-tab active" id="tab-realtime" data-mode="realtime">📹 リアルタイム</button>
       <button class="mode-tab" id="tab-upload" data-mode="upload">動画解析</button>
+      <button class="mode-tab" id="tab-debug" data-mode="debug">🔧 デバッグ</button>
     </div>
 
     <!-- ===== REALTIME MODE ===== -->
@@ -899,6 +1015,80 @@
         </div>
       </div>
     </div>
+
+    <!-- ===== DEBUG MODE ===== -->
+    <div class="mode-panel" id="panel-debug">
+      <div class="dbg-section">
+        <div class="dbg-section-title">📡 リアルタイム判定モニタ</div>
+        <div style="font-size:0.72rem; color:var(--text-secondary); margin-bottom:8px;">
+          ※ リアルタイムタブで計測を開始すると、ここに波形と判定状態が表示されます
+        </div>
+        <div class="dbg-status-grid">
+          <div class="dbg-stat"><div class="dbg-stat-label">判定</div><div class="dbg-stat-value" id="dbg-verdict">—</div></div>
+          <div class="dbg-stat"><div class="dbg-stat-label">CPM</div><div class="dbg-stat-value" id="dbg-cpm">—</div></div>
+          <div class="dbg-stat"><div class="dbg-stat-label">振幅</div><div class="dbg-stat-value" id="dbg-amp">—</div></div>
+          <div class="dbg-stat"><div class="dbg-stat-label">CV</div><div class="dbg-stat-value" id="dbg-cv">—</div></div>
+        </div>
+        <div class="dbg-conditions">
+          <div class="dbg-cond" id="dbg-cond-amp"><span class="dbg-cond-dot"></span>振幅 ≥ 閾値</div>
+          <div class="dbg-cond" id="dbg-cond-cpm"><span class="dbg-cond-dot"></span>CPM 範囲内</div>
+          <div class="dbg-cond" id="dbg-cond-cv"><span class="dbg-cond-dot"></span>規則的(CV≤閾値)</div>
+        </div>
+        <div class="dbg-reason" id="dbg-reason">待機中</div>
+        <canvas id="dbg-waveform-live" class="dbg-canvas"></canvas>
+      </div>
+
+      <div class="dbg-section">
+        <div class="dbg-section-title">⚙️ 閾値チューニング</div>
+        <div class="dbg-sliders">
+          <label class="dbg-slider"><span>最小振幅 <b id="dbg-val-amp">0.012</b></span>
+            <input type="range" id="dbg-sl-amp" min="0.002" max="0.06" step="0.001" value="0.012"></label>
+          <label class="dbg-slider"><span>最小CPM <b id="dbg-val-mincpm">80</b></span>
+            <input type="range" id="dbg-sl-mincpm" min="40" max="120" step="1" value="80"></label>
+          <label class="dbg-slider"><span>最大CPM <b id="dbg-val-maxcpm">160</b></span>
+            <input type="range" id="dbg-sl-maxcpm" min="100" max="220" step="1" value="160"></label>
+          <label class="dbg-slider"><span>最大CV <b id="dbg-val-cv">0.40</b></span>
+            <input type="range" id="dbg-sl-cv" min="0.1" max="1.0" step="0.01" value="0.40"></label>
+          <label class="dbg-slider"><span>判定ウィンドウ秒 <b id="dbg-val-win">2.0</b></span>
+            <input type="range" id="dbg-sl-win" min="1.0" max="4.0" step="0.1" value="2.0"></label>
+          <label class="dbg-slider"><span>ピーク突出度 <b id="dbg-val-prom">0.30</b></span>
+            <input type="range" id="dbg-sl-prom" min="0.05" max="0.8" step="0.01" value="0.30"></label>
+        </div>
+        <button class="btn btn-reset" id="dbg-sl-reset" style="margin-top:8px;">↺ 既定値に戻す</button>
+      </div>
+
+      <div class="dbg-section">
+        <div class="dbg-section-title">🎬 サンプル動画で精度評価</div>
+        <div class="upload-area" id="dbg-upload-area">
+          <div class="upload-icon">🎞</div>
+          <div class="upload-text"><strong>タップして検証動画を選択</strong><br>ground truth がわかる動画を使用</div>
+          <input type="file" id="dbg-file-input" accept="video/*">
+        </div>
+        <video id="dbg-video" controls playsinline style="display:none; width:100%; border-radius:12px; margin-top:8px; border:1px solid var(--border-color);"></video>
+        <div class="model-selector">
+          <span class="model-label">解析精度</span>
+          <div class="model-toggle">
+            <button class="model-btn active" data-dbg-model="lite">⚡ Lite</button>
+            <button class="model-btn" data-dbg-model="full">🎯 Full</button>
+          </div>
+        </div>
+        <div class="controls">
+          <button class="btn btn-upload" id="dbg-btn-analyze" disabled>🔍 解析+評価</button>
+          <button class="btn btn-reset" id="dbg-btn-rerun" disabled>↻ 閾値で再判定</button>
+        </div>
+        <div class="progress-wrapper" id="dbg-progress">
+          <div class="progress-label"><span id="dbg-progress-label">解析中…</span><span id="dbg-progress-pct">0%</span></div>
+          <div class="progress-bar"><div class="progress-fill" id="dbg-progress-fill"></div></div>
+        </div>
+        <div id="dbg-replay-summary" style="display:none;"></div>
+        <canvas id="dbg-waveform-replay" class="dbg-canvas" style="display:none;"></canvas>
+        <div id="dbg-timeline-legend" style="display:none;">
+          <span style="color:var(--accent-green);">■</span> 圧迫中 &nbsp;
+          <span style="color:var(--accent-red);">■</span> 中断 &nbsp;
+          <span style="color:var(--accent-blue);">●</span> ピーク
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -922,14 +1112,19 @@
       } else if (type === "init_done") {
         if (workerInitResolver) workerInitResolver();
       } else if (type === "detect_result") {
-        const { wy, timestamp, frameId } = payload;
+        const { wy, points, visibleCount, timestamp, frameId } = payload;
         if (frameId === "rt") {
-          rtProcess(wy, performance.now());
+          rtProcess(wy, points, performance.now());
         } else if (frameId === "up") {
-          upFrameStatus = { wy, timestamp };
+          upFrameStatus = { wy, points, visibleCount, timestamp };
           if (upWorkerFrameResolver) {
             upWorkerFrameResolver();
             upWorkerFrameResolver = null;
+          }
+        } else if (frameId === "dbg") {
+          if (dbgWorkerFrameResolver) {
+            dbgWorkerFrameResolver({ wy, points, visibleCount, timestamp });
+            dbgWorkerFrameResolver = null;
           }
         }
       } else if (type === "error") {
@@ -946,25 +1141,168 @@
       });
     }
 
-    // Detect rhythmic oscillation (CPR = 100-120/min = ~2Hz)
-    function detectCPR(yArray) {
-      if (yArray.length < 10) return false;
-      const minY = Math.min(...yArray);
-      const maxY = Math.max(...yArray);
-      const amplitude = maxY - minY;
-      if (amplitude < 0.02) return false;
-      let directionChanges = 0;
-      let prevDir = 0;
-      for (let i = 1; i < yArray.length; i++) {
-        const diff = yArray[i] - yArray[i - 1];
-        if (Math.abs(diff) < 0.002) continue;
-        const dir = diff > 0 ? 1 : -1;
-        if (prevDir !== 0 && dir !== prevDir) {
-          directionChanges++;
-        }
-        prevDir = dir;
+    // ========== CPR Detection: Peak-based with CPM estimation ==========
+    // Input: array of {t, y} samples (t in ms, y normalized 0-1 from MediaPipe).
+    // Output: { isCompressing, cpm, amplitude, peaks, intervals, cv, reason }.
+    //
+    // Pipeline:
+    //   1. Take the last `windowSec` seconds of samples.
+    //   2. Detrend (subtract window mean) to remove slow drift / camera offset.
+    //   3. Require peak-to-peak amplitude >= MIN_AMPLITUDE.
+    //   4. Find local maxima above PEAK_PROMINENCE * (amplitude/2).
+    //      (In MediaPipe normalized coords, y grows downward — pressing the chest
+    //       lowers shoulders/elbows, so compression bottoms appear as peaks.)
+    //   5. Merge peaks closer than MIN_PEAK_SEP seconds (impossible CPR rate).
+    //   6. Compute peak intervals → mean CPM.
+    //   7. Require CPM in [MIN_CPM, MAX_CPM] AND interval CV <= MAX_CV.
+    const CPR_CONFIG = {
+      windowSec: 2.0,
+      minAmplitude: 0.012,    // normalized image-height units
+      peakProminence: 0.30,   // fraction of (amplitude/2) a peak must exceed
+      minPeakSep: 0.25,       // seconds (caps CPM at 240)
+      minCPM: 80,             // permissive lower bound (guideline 100-120)
+      maxCPM: 160,            // permissive upper bound
+      maxCV: 0.40,            // interval coefficient of variation
+      minPeaks: 2,
+      minValidRatio: 0.60     // at least 60% of window must have valid y
+    };
+
+    function detectCompression(samples, config = CPR_CONFIG) {
+      const result = {
+        isCompressing: false,
+        cpm: 0,
+        amplitude: 0,
+        peaks: [],
+        intervals: [],
+        cv: 0,
+        windowSamples: samples.length,
+        reason: "insufficient_data"
+      };
+      if (samples.length < 8) return result;
+
+      const ys = samples.map(s => s.y);
+      const ts = samples.map(s => s.t);
+      const validCount = ys.filter(v => v !== null && !isNaN(v)).length;
+      if (validCount < samples.length * config.minValidRatio) {
+        result.reason = "low_visibility";
+        return result;
       }
-      return directionChanges >= 3;
+
+      // Linear interpolation for null gaps so peak indices line up with timestamps
+      const filled = ys.slice();
+      for (let i = 0; i < filled.length; i++) {
+        if (filled[i] === null || isNaN(filled[i])) {
+          let prev = i - 1; while (prev >= 0 && (filled[prev] === null || isNaN(filled[prev]))) prev--;
+          let next = i + 1; while (next < filled.length && (ys[next] === null || isNaN(ys[next]))) next++;
+          if (prev >= 0 && next < filled.length) {
+            const f = (i - prev) / (next - prev);
+            filled[i] = filled[prev] * (1 - f) + ys[next] * f;
+          } else if (prev >= 0) filled[i] = filled[prev];
+          else if (next < filled.length) filled[i] = ys[next];
+          else filled[i] = 0;
+        }
+      }
+
+      // Detrend by subtracting mean
+      const mean = filled.reduce((a, b) => a + b, 0) / filled.length;
+      const detrended = filled.map(v => v - mean);
+
+      const maxV = Math.max(...detrended);
+      const minV = Math.min(...detrended);
+      result.amplitude = maxV - minV;
+
+      if (result.amplitude < config.minAmplitude) {
+        result.reason = "low_amplitude";
+        return result;
+      }
+
+      // Local maxima
+      const peakThreshold = config.peakProminence * (result.amplitude / 2);
+      const rawPeaks = [];
+      for (let i = 1; i < detrended.length - 1; i++) {
+        if (detrended[i] > detrended[i - 1] && detrended[i] >= detrended[i + 1] && detrended[i] > peakThreshold) {
+          rawPeaks.push(i);
+        }
+      }
+
+      // Merge close peaks (impossible to compress faster than ~240/min)
+      const peaks = [];
+      for (const p of rawPeaks) {
+        if (peaks.length === 0) { peaks.push(p); continue; }
+        const last = peaks[peaks.length - 1];
+        const dtSec = (ts[p] - ts[last]) / 1000;
+        if (dtSec >= config.minPeakSep) peaks.push(p);
+        else if (detrended[p] > detrended[last]) peaks[peaks.length - 1] = p;
+      }
+      result.peaks = peaks;
+
+      if (peaks.length < config.minPeaks) {
+        result.reason = "few_peaks";
+        return result;
+      }
+
+      const intervals = [];
+      for (let i = 1; i < peaks.length; i++) {
+        intervals.push((ts[peaks[i]] - ts[peaks[i - 1]]) / 1000);
+      }
+      result.intervals = intervals;
+      const meanInt = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      result.cpm = 60 / meanInt;
+
+      if (result.cpm < config.minCPM || result.cpm > config.maxCPM) {
+        result.reason = "out_of_range";
+        return result;
+      }
+
+      if (intervals.length >= 2) {
+        const variance = intervals.reduce((s, v) => s + (v - meanInt) ** 2, 0) / intervals.length;
+        result.cv = Math.sqrt(variance) / meanInt;
+        if (result.cv > config.maxCV) {
+          result.reason = "irregular";
+          return result;
+        }
+      }
+
+      result.isCompressing = true;
+      result.reason = "ok";
+      return result;
+    }
+
+    // Trim samples to last `windowSec` seconds (mutates).
+    function trimToWindow(samples, nowMs, windowSec = CPR_CONFIG.windowSec) {
+      const cutoff = nowMs - windowSec * 1000;
+      while (samples.length > 0 && samples[0].t < cutoff) samples.shift();
+    }
+
+    // Run detectCompression as a sliding trailing window over a full timeline.
+    // samples: array of {t (ms), y} sorted by t ascending.
+    // Returns boolean[] of same length: compFlags[i] = "is compressing at sample i".
+    function analyzeTimelineCompression(samples, windowSec = CPR_CONFIG.windowSec) {
+      const flags = new Array(samples.length).fill(false);
+      let lo = 0;
+      for (let i = 0; i < samples.length; i++) {
+        const tEnd = samples[i].t;
+        const tStart = tEnd - windowSec * 1000;
+        while (lo < i && samples[lo].t < tStart) lo++;
+        const win = samples.slice(lo, i + 1);
+        const det = detectCompression(win);
+        flags[i] = det.isCompressing;
+      }
+      return flags;
+    }
+
+    // Detailed per-sample analysis (returns detection result objects too).
+    function analyzeTimelineDetailed(samples, windowSec = CPR_CONFIG.windowSec) {
+      const results = new Array(samples.length);
+      let lo = 0;
+      for (let i = 0; i < samples.length; i++) {
+        const tEnd = samples[i].t;
+        const tStart = tEnd - windowSec * 1000;
+        while (lo < i && samples[lo].t < tStart) lo++;
+        const win = samples.slice(lo, i + 1);
+        results[i] = detectCompression(win);
+      }
+      return results;
     }
 
     // ========== Real-time Related ==========
@@ -975,7 +1313,8 @@
 
     let rtRecorder = null;
     let rtChunks = [];
-    let rtYHistory = [];
+    let rtSamples = []; // {t, y, points} sliding window of last few seconds
+    let rtLastDetection = null;
     let rtMeasuring = false;
     let rtStartTime = 0;
     let rtLastStateTime = 0;
@@ -1016,7 +1355,6 @@
     const rtCardTotal = document.getElementById("rt-card-total");
     const rtLog = document.getElementById("rt-log");
 
-    const WINDOW = 30; // ~1 second history
 
     async function startCamera() {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -1094,22 +1432,20 @@
       rtAnimId = requestAnimationFrame(rtLoop);
     }
 
-    function rtProcess(wy, ts) {
-      if (wy !== null) rtYHistory.push(wy);
-      while (rtYHistory.length > WINDOW * 3) rtYHistory.shift();
-      if (rtYHistory.length < WINDOW) return;
-      const win = rtYHistory.slice(-WINDOW);
-      const comp = detectCPR(win);
+    function rtProcess(wy, points, ts) {
+      rtSamples.push({ t: ts, y: wy, points });
+      trimToWindow(rtSamples, ts);
+      const det = detectCompression(rtSamples);
+      rtLastDetection = det;
+      const comp = det.isCompressing;
+
       if (rtCompressing && !comp) {
         rtIntStart = ts;
         rtLastStateTime = ts;
       } else if (!rtCompressing && comp && rtIntStart !== null) {
         const dur = (ts - rtIntStart) / 1000;
         if (dur >= 1.0) {
-          rtInterruptions.push({
-            duration: dur,
-            at: (rtIntStart - rtStartTime) / 1000
-          });
+          rtInterruptions.push({ duration: dur, at: (rtIntStart - rtStartTime) / 1000 });
           addLog(rtLog, rtInterruptions.length, dur, (rtIntStart - rtStartTime) / 1000);
         }
         rtIntStart = null;
@@ -1117,6 +1453,11 @@
       }
       rtCompressing = comp;
       rtUpdateUI(comp, ts);
+
+      // Debug tab live update (only when active)
+      if (typeof dbgRenderLive === "function" && document.getElementById("panel-debug")?.classList.contains("active")) {
+        dbgRenderLive(rtSamples, det);
+      }
     }
 
 
@@ -1224,7 +1565,7 @@
       if (rtRecorder && rtRecorder.state !== "inactive") rtRecorder.stop();
       rtDownloadLink.style.display = "none";
       releaseWakeLock();
-      rtYHistory.length = 0; rtInterruptions = []; rtIntStart = null; rtCompressing = false; rtLastStateTime = 0;
+      rtSamples.length = 0; rtLastDetection = null; rtInterruptions = []; rtIntStart = null; rtCompressing = false; rtLastStateTime = 0;
       rtStartTime = 0;
       rtStatCount.textContent = "0"; rtStatTotal.textContent = "0.0"; rtStatLongest.textContent = "0.0";
       rtStatCCF.textContent = "-"; rtElapsed.textContent = "00:00";
@@ -1394,30 +1735,24 @@
         }
       }
 
-      // Analyze using rhythmic peak detection
-      const windowSize = Math.max(Math.floor(fps * 1.0), 5); // 1 second window
+      // Analyze using peak-based detectCompression (sliding window).
+      const allSamples = timestamps.map((t, i) => ({ t: t * 1000, y: yCoords[i] }));
+      const compFlags = analyzeTimelineCompression(allSamples, CPR_CONFIG.windowSec);
+
+      // Convert frame-by-frame compressing flags to interruption list.
+      // A frame at index i represents the state of the trailing windowSec ending at timestamps[i].
       const interruptions = [];
       let isComp = false, intStartIdx = -1;
-
-      for (let i = 0; i <= yCoords.length - windowSize; i++) {
-        const win = yCoords.slice(i, i + windowSize).filter(v => v !== null);
-        let comp = false;
-        if (win.length >= windowSize * 0.5) {
-          comp = detectCPR(win);
-        }
-
-        if (isComp && !comp) {
-          intStartIdx = i;
-        } else if (!isComp && comp && intStartIdx >= 0) {
+      for (let i = 0; i < compFlags.length; i++) {
+        const comp = compFlags[i];
+        if (isComp && !comp) intStartIdx = i;
+        else if (!isComp && comp && intStartIdx >= 0) {
           const dur = timestamps[i] - timestamps[intStartIdx];
-          if (dur >= 1.0) {
-            interruptions.push({ duration: dur, at: timestamps[intStartIdx] });
-          }
+          if (dur >= 1.0) interruptions.push({ duration: dur, at: timestamps[intStartIdx] });
           intStartIdx = -1;
         }
         isComp = comp;
       }
-      // trailing interruption
       if (!isComp && intStartIdx >= 0) {
         const dur = timestamps[timestamps.length - 1] - timestamps[intStartIdx];
         if (dur >= 1.0) interruptions.push({ duration: dur, at: timestamps[intStartIdx] });
@@ -1448,21 +1783,23 @@
       upStatusText.textContent = "完了";
       upAnalyzing = false;
 
-      // Build per-frame status map for telop generation
+      // Build per-frame status map for telop generation.
+      // A frame is "detecting" until the trailing window first reaches windowSec.
       const frameStatusMap = [];
+      const detectingUntil = CPR_CONFIG.windowSec;
       for (let i = 0; i < timestamps.length; i++) {
-        // Find if this time falls within any interruption
-        let status = "compressing";
+        const tt = timestamps[i];
+        let status = compFlags[i] ? "compressing" : "interrupting";
         let intDuration = 0;
         for (const intItem of interruptions) {
-          if (t >= intItem.at && t < intItem.at + intItem.duration) {
-            status = "interrupting"; intDuration = t - intItem.at;
+          if (tt >= intItem.at && tt < intItem.at + intItem.duration) {
+            status = "interrupting";
+            intDuration = tt - intItem.at;
             break;
           }
         }
-        // Before first compression detected, show idle
-        if (i < windowSize) status = "detecting";
-        frameStatusMap.push({ time: t, status, intDuration });
+        if (tt < detectingUntil) status = "detecting";
+        frameStatusMap.push({ time: tt, status, intDuration });
       } // Store analysis data for video generation
       window._cprAnalysis = {
         interruptions, totalInt, duration, frameStatusMap, ccf: duration > 0 ?
@@ -1814,6 +2151,381 @@
       ctx.lineTo(x, y + r);
       ctx.quadraticCurveTo(x, y, x + r, y);
       ctx.closePath();
+    }
+
+    // ========== DEBUG MODE ==========
+    let dbgWorkerFrameResolver = null;
+    let dbgRtBuffer = []; // longer history (5 sec) for live waveform
+    let dbgReplayData = null; // { samples, timestamps, duration }
+
+    const dbgCanvasLive = document.getElementById("dbg-waveform-live");
+    const dbgCanvasReplay = document.getElementById("dbg-waveform-replay");
+
+    // Slider wiring
+    const SL = {
+      amp: ["dbg-sl-amp", "dbg-val-amp", "minAmplitude", v => v.toFixed(3)],
+      mincpm: ["dbg-sl-mincpm", "dbg-val-mincpm", "minCPM", v => v.toFixed(0)],
+      maxcpm: ["dbg-sl-maxcpm", "dbg-val-maxcpm", "maxCPM", v => v.toFixed(0)],
+      cv: ["dbg-sl-cv", "dbg-val-cv", "maxCV", v => v.toFixed(2)],
+      win: ["dbg-sl-win", "dbg-val-win", "windowSec", v => v.toFixed(1)],
+      prom: ["dbg-sl-prom", "dbg-val-prom", "peakProminence", v => v.toFixed(2)]
+    };
+    function dbgApplySlider(key) {
+      const [slId, valId, configKey, fmt] = SL[key];
+      const v = parseFloat(document.getElementById(slId).value);
+      CPR_CONFIG[configKey] = v;
+      document.getElementById(valId).textContent = fmt(v);
+    }
+    Object.keys(SL).forEach(k => {
+      document.getElementById(SL[k][0]).addEventListener("input", () => dbgApplySlider(k));
+    });
+    document.getElementById("dbg-sl-reset").addEventListener("click", () => {
+      const defaults = { amp: 0.012, mincpm: 80, maxcpm: 160, cv: 0.40, win: 2.0, prom: 0.30 };
+      Object.entries(defaults).forEach(([k, v]) => {
+        document.getElementById(SL[k][0]).value = v;
+        dbgApplySlider(k);
+      });
+      if (dbgReplayData) dbgRerunReplay();
+    });
+
+    // ----- Live waveform rendering -----
+    function dbgRenderLive(samples, det) {
+      // Track up to 5 sec for display
+      const last = samples[samples.length - 1];
+      if (last) dbgRtBuffer.push({ t: last.t, y: last.y });
+      const cutoff = (last ? last.t : performance.now()) - 5000;
+      while (dbgRtBuffer.length > 0 && dbgRtBuffer[0].t < cutoff) dbgRtBuffer.shift();
+
+      dbgUpdateStatusPanel(det);
+      dbgDrawWaveform(dbgCanvasLive, dbgRtBuffer, det, samples);
+    }
+
+    function dbgUpdateStatusPanel(det) {
+      const verdict = document.getElementById("dbg-verdict");
+      verdict.textContent = det.isCompressing ? "圧迫中" : "—";
+      verdict.style.color = det.isCompressing ? "var(--accent-green)" : "var(--text-secondary)";
+      document.getElementById("dbg-cpm").textContent = det.cpm > 0 ? det.cpm.toFixed(0) : "—";
+      document.getElementById("dbg-amp").textContent = det.amplitude > 0 ? det.amplitude.toFixed(3) : "—";
+      document.getElementById("dbg-cv").textContent = det.cv > 0 ? det.cv.toFixed(2) : "—";
+
+      const ampOk = det.amplitude >= CPR_CONFIG.minAmplitude;
+      const cpmOk = det.cpm >= CPR_CONFIG.minCPM && det.cpm <= CPR_CONFIG.maxCPM;
+      const cvOk = det.peaks.length >= 2 && det.cv <= CPR_CONFIG.maxCV;
+      document.getElementById("dbg-cond-amp").classList.toggle("met", ampOk);
+      document.getElementById("dbg-cond-cpm").classList.toggle("met", cpmOk);
+      document.getElementById("dbg-cond-cv").classList.toggle("met", cvOk);
+
+      const reasonMap = {
+        ok: "✓ すべての条件を満たしています",
+        insufficient_data: "サンプル不足（解析開始直後）",
+        low_visibility: "肩・肘が十分に見えていません",
+        low_amplitude: "動きが小さすぎます（振幅不足）",
+        few_peaks: "ピーク数が不足（ウィンドウ内で2回未満）",
+        out_of_range: `CPM が範囲外（${det.cpm.toFixed(0)}/min）`,
+        irregular: `リズムが不規則（CV=${det.cv.toFixed(2)}）`
+      };
+      document.getElementById("dbg-reason").textContent = reasonMap[det.reason] || det.reason;
+    }
+
+    function dbgDrawWaveform(canvas, buffer, det, winSamples) {
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      if (buffer.length < 2) {
+        ctx.fillStyle = "#445";
+        ctx.font = "12px Inter, sans-serif";
+        ctx.fillText("waiting for samples…", 10, h / 2);
+        return;
+      }
+      const tMin = buffer[0].t, tMax = buffer[buffer.length - 1].t;
+      const span = Math.max(tMax - tMin, 100);
+      const ys = buffer.map(s => s.y).filter(v => v !== null);
+      if (ys.length < 2) return;
+      const yMin = Math.min(...ys), yMax = Math.max(...ys);
+      const yRange = Math.max(yMax - yMin, 0.005);
+
+      // Window highlight (the part fed into detectCompression)
+      if (winSamples && winSamples.length > 0) {
+        const winStart = winSamples[0].t;
+        const x0 = ((winStart - tMin) / span) * w;
+        ctx.fillStyle = "rgba(68, 138, 255, 0.08)";
+        ctx.fillRect(x0, 0, w - x0, h);
+      }
+
+      // Center line
+      ctx.strokeStyle = "#1e2a45";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
+
+      // Waveform
+      ctx.strokeStyle = det.isCompressing ? "var(--accent-green)" : "#5a7";
+      ctx.strokeStyle = det.isCompressing ? "#00e676" : "#5a7";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      let started = false;
+      for (const s of buffer) {
+        if (s.y === null) continue;
+        const x = ((s.t - tMin) / span) * w;
+        const y = h - 10 - ((s.y - yMin) / yRange) * (h - 20);
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // Peaks (only valid within winSamples mapping)
+      if (winSamples && det.peaks && det.peaks.length > 0) {
+        ctx.fillStyle = "#448aff";
+        for (const idx of det.peaks) {
+          const s = winSamples[idx];
+          if (!s || s.y === null) continue;
+          const x = ((s.t - tMin) / span) * w;
+          const y = h - 10 - ((s.y - yMin) / yRange) * (h - 20);
+          ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+    }
+
+    // ----- Tab activation: clear stale live state -----
+    document.getElementById("tab-debug").addEventListener("click", () => {
+      // Reset live buffer so user gets fresh view
+      // (Don't clear rtSamples — production logic still uses them.)
+      if (!rtMeasuring) {
+        dbgRtBuffer = [];
+        const ctx = dbgCanvasLive.getContext("2d");
+        ctx.clearRect(0, 0, dbgCanvasLive.width, dbgCanvasLive.height);
+      }
+    });
+
+    // ========== Debug: sample video evaluation ==========
+    let dbgSelectedModel = "lite";
+    document.querySelectorAll("[data-dbg-model]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-dbg-model]").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        dbgSelectedModel = btn.dataset.dbgModel;
+      });
+    });
+
+    const dbgUploadArea = document.getElementById("dbg-upload-area");
+    const dbgFileInput = document.getElementById("dbg-file-input");
+    const dbgVideo = document.getElementById("dbg-video");
+    const dbgBtnAnalyze = document.getElementById("dbg-btn-analyze");
+    const dbgBtnRerun = document.getElementById("dbg-btn-rerun");
+    const dbgProgress = document.getElementById("dbg-progress");
+
+    dbgUploadArea.addEventListener("click", () => dbgFileInput.click());
+    dbgFileInput.addEventListener("change", (e) => {
+      if (e.target.files.length > 0) {
+        const file = e.target.files[0];
+        dbgVideo.src = URL.createObjectURL(file);
+        dbgVideo.style.display = "block";
+        dbgUploadArea.style.display = "none";
+        dbgBtnAnalyze.disabled = false;
+      }
+    });
+
+    let dbgAnalyzing = false;
+    dbgBtnAnalyze.addEventListener("click", async () => {
+      if (dbgAnalyzing) return;
+      dbgAnalyzing = true;
+      dbgBtnAnalyze.disabled = true;
+      dbgProgress.classList.add("active");
+      document.getElementById("dbg-progress-label").textContent = `AIモデル(${dbgSelectedModel})を読み込み中…`;
+      await initMediaPipe("VIDEO", dbgSelectedModel);
+
+      const video = dbgVideo;
+      if (video.readyState < 1) {
+        await new Promise(r => { video.onloadedmetadata = r; setTimeout(r, 2000); });
+      }
+
+      function dbgFastSeek(t) {
+        return new Promise(resolve => {
+          let done = false;
+          const to = setTimeout(() => { if (!done) { done = true; resolve(); } }, 300);
+          if ('requestVideoFrameCallback' in video) {
+            video.requestVideoFrameCallback(() => { if (!done) { clearTimeout(to); done = true; resolve(); } });
+          } else {
+            const h = () => { video.removeEventListener('seeked', h); if (!done) { clearTimeout(to); done = true; resolve(); } };
+            video.addEventListener('seeked', h);
+          }
+          video.currentTime = t;
+        });
+      }
+
+      await dbgFastSeek(0);
+      const fps = 10;
+      const duration = video.duration;
+      if (!duration || !isFinite(duration)) {
+        document.getElementById("dbg-progress-label").textContent = "動画の長さを取得できません";
+        dbgAnalyzing = false; dbgBtnAnalyze.disabled = false;
+        return;
+      }
+      const totalFrames = Math.floor(duration * fps);
+      const samples = [];
+      let monoTs = 0;
+      for (let i = 0; i <= totalFrames; i++) {
+        const t = i / fps; if (t > duration) break;
+        await dbgFastSeek(t);
+        monoTs += 100;
+        try {
+          const bitmap = await createImageBitmap(video);
+          const result = await new Promise(resolve => {
+            dbgWorkerFrameResolver = resolve;
+            worker.postMessage({
+              type: "detect",
+              payload: { imageBitmap: bitmap, timestamp: monoTs, frameId: "dbg" }
+            }, [bitmap]);
+          });
+          samples.push({ t: t * 1000, y: result.wy, points: result.points, visibleCount: result.visibleCount });
+        } catch (e) {
+          samples.push({ t: t * 1000, y: null, points: [], visibleCount: 0 });
+        }
+        const pct = Math.round((i / totalFrames) * 100);
+        document.getElementById("dbg-progress-pct").textContent = pct + "%";
+        document.getElementById("dbg-progress-fill").style.width = pct + "%";
+        document.getElementById("dbg-progress-label").textContent = `解析中… ${t.toFixed(1)}s / ${duration.toFixed(1)}s`;
+      }
+
+      dbgReplayData = { samples, duration };
+      document.getElementById("dbg-progress-label").textContent = "解析完了。判定を計算中…";
+      dbgRerunReplay();
+      dbgBtnRerun.disabled = false;
+      dbgBtnAnalyze.disabled = false;
+      dbgAnalyzing = false;
+    });
+
+    dbgBtnRerun.addEventListener("click", () => {
+      if (dbgReplayData) dbgRerunReplay();
+    });
+
+    function dbgRerunReplay() {
+      const { samples, duration } = dbgReplayData;
+      const flags = analyzeTimelineCompression(samples, CPR_CONFIG.windowSec);
+      // Build interruption list
+      const interruptions = [];
+      let isComp = false, intStartIdx = -1;
+      for (let i = 0; i < flags.length; i++) {
+        if (isComp && !flags[i]) intStartIdx = i;
+        else if (!isComp && flags[i] && intStartIdx >= 0) {
+          const dur = (samples[i].t - samples[intStartIdx].t) / 1000;
+          if (dur >= 1.0) interruptions.push({ duration: dur, at: samples[intStartIdx].t / 1000, endAt: samples[i].t / 1000 });
+          intStartIdx = -1;
+        }
+        isComp = flags[i];
+      }
+      if (!isComp && intStartIdx >= 0) {
+        const dur = (samples[samples.length - 1].t - samples[intStartIdx].t) / 1000;
+        if (dur >= 1.0) interruptions.push({
+          duration: dur, at: samples[intStartIdx].t / 1000,
+          endAt: samples[samples.length - 1].t / 1000
+        });
+      }
+
+      // Estimate average CPM over compressing portions
+      const detailed = analyzeTimelineDetailed(samples, CPR_CONFIG.windowSec);
+      const compCpms = detailed.filter(d => d.isCompressing && d.cpm > 0).map(d => d.cpm);
+      const avgCpm = compCpms.length > 0 ? compCpms.reduce((a, b) => a + b, 0) / compCpms.length : 0;
+
+      const totalInt = interruptions.reduce((s, i) => s + i.duration, 0);
+      const ccf = duration > 0 ? Math.round(Math.max(0, (duration - totalInt) / duration * 100)) : 0;
+
+      // Render summary
+      const summary = document.getElementById("dbg-replay-summary");
+      summary.style.display = "block";
+      summary.innerHTML = `
+        <div><b>動画長:</b> ${duration.toFixed(1)} 秒</div>
+        <div><b>中断回数:</b> ${interruptions.length} 回</div>
+        <div><b>合計中断:</b> ${totalInt.toFixed(1)} 秒</div>
+        <div><b>圧迫率 (CCF):</b> ${ccf}%</div>
+        <div><b>平均CPM:</b> ${avgCpm > 0 ? avgCpm.toFixed(0) : "—"}</div>
+        <div><b>有効フレーム率:</b> ${(samples.filter(s => s.y !== null).length / samples.length * 100).toFixed(0)}%</div>
+      `;
+
+      // Draw timeline waveform
+      dbgCanvasReplay.style.display = "block";
+      document.getElementById("dbg-timeline-legend").style.display = "block";
+      dbgDrawReplayTimeline(samples, flags, detailed, duration);
+    }
+
+    function dbgDrawReplayTimeline(samples, flags, detailed, duration) {
+      const canvas = dbgCanvasReplay;
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+      const ctx = canvas.getContext("2d");
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+
+      const tMin = 0, tMax = duration * 1000;
+      const span = Math.max(tMax - tMin, 1);
+
+      // Background strips per frame (green=comp, red=interrupt, grey=invalid)
+      const stripH = 18;
+      for (let i = 0; i < samples.length; i++) {
+        const x0 = ((samples[i].t - tMin) / span) * w;
+        const xN = i < samples.length - 1
+          ? ((samples[i + 1].t - tMin) / span) * w
+          : w;
+        if (samples[i].y === null) ctx.fillStyle = "#2a2f3a";
+        else if (flags[i]) ctx.fillStyle = "rgba(0, 230, 118, 0.35)";
+        else ctx.fillStyle = "rgba(255, 23, 68, 0.25)";
+        ctx.fillRect(x0, 0, xN - x0 + 1, stripH);
+      }
+
+      // Waveform area starts below strip
+      const yTop = stripH + 4;
+      const yBottom = h - 4;
+      const yArea = yBottom - yTop;
+      const valid = samples.filter(s => s.y !== null);
+      if (valid.length < 2) return;
+      const yMin = Math.min(...valid.map(s => s.y));
+      const yMax = Math.max(...valid.map(s => s.y));
+      const yRange = Math.max(yMax - yMin, 0.005);
+
+      ctx.strokeStyle = "#1e2a45";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, yTop + yArea / 2); ctx.lineTo(w, yTop + yArea / 2); ctx.stroke();
+
+      ctx.strokeStyle = "#8bbcff";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      let started = false;
+      for (const s of samples) {
+        if (s.y === null) { started = false; continue; }
+        const x = ((s.t - tMin) / span) * w;
+        const y = yBottom - ((s.y - yMin) / yRange) * yArea;
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // Mark peaks from any per-window detection
+      ctx.fillStyle = "#448aff";
+      const drawn = new Set();
+      for (let i = 0; i < detailed.length; i++) {
+        if (!detailed[i].isCompressing) continue;
+        // detailed[i].peaks are relative to the trailing window. Convert via samples.
+        // We don't keep window start index easily; simple: only mark peaks at frame i itself.
+        // To avoid duplication we mark every "i" where the *latest* index in window is a peak.
+        const det = detailed[i];
+        if (det.peaks.length === 0) continue;
+        // Last peak index of window points to sample (i - (windowLen - 1) + lastPeakIndex).
+        const lastPeakIdx = det.peaks[det.peaks.length - 1];
+        const winLen = det.windowSamples;
+        const absIdx = i - (winLen - 1) + lastPeakIdx;
+        if (absIdx >= 0 && absIdx < samples.length && !drawn.has(absIdx)) {
+          drawn.add(absIdx);
+          const s = samples[absIdx];
+          if (s.y === null) continue;
+          const x = ((s.t - tMin) / span) * w;
+          const y = yBottom - ((s.y - yMin) / yRange) * yArea;
+          ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+        }
+      }
     }
   </script>
 </body>
