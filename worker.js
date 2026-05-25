@@ -2,7 +2,6 @@ importScripts("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.1/visio
 
 console.log("Worker Globals:", Object.keys(self).filter(k => !k.startsWith("webkit") && !k.startsWith("moz")));
 
-// Extract globals from MediaPipe bundle
 const FilesetResolver = self.FilesetResolver || (self.vision && self.vision.FilesetResolver);
 const PoseLandmarker = self.PoseLandmarker || (self.vision && self.vision.PoseLandmarker);
 
@@ -11,12 +10,17 @@ console.log("Detected PoseLandmarker:", !!PoseLandmarker);
 
 let poseLandmarker = null;
 let currentModelType = null;
-let visionInstance = null; // Renamed from 'vision' to avoid conflict
+let visionInstance = null;
 
 const MODEL_URLS = {
   lite: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
   full: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task"
 };
+
+// MediaPipe pose landmark indices used for CPR detection
+// 11: left shoulder, 12: right shoulder, 13: left elbow, 14: right elbow
+const TRACK_INDICES = [11, 12, 13, 14];
+const MIN_VISIBILITY = 0.3;
 
 const DB_NAME = "cpr-ai-models";
 const STORE_NAME = "models";
@@ -55,24 +59,17 @@ async function cacheModel(type, buffer) {
 }
 
 async function loadModel(type) {
-  console.log(`loadModel(${type}) start`);
   let buffer = await getCachedModel(type);
   if (!buffer) {
-    console.log(`Model cache miss for ${type}`);
     self.postMessage({ type: "progress", message: `AIモデル(${type})をダウンロード中...` });
     const res = await fetch(MODEL_URLS[type]);
     if (!res.ok) throw new Error("モデルのダウンロードに失敗しました");
     buffer = await res.arrayBuffer();
     await cacheModel(type, buffer);
-    console.log(`Model ${type} downloaded and cached`);
   } else {
-    console.log(`Model cache hit for ${type}, size: ${buffer.byteLength}`);
     self.postMessage({ type: "progress", message: `AIモデル(${type})をローカルから展開中...` });
   }
-  console.log(`Converting buffer to Uint8Array for ${type}`);
-  const uint8 = new Uint8Array(buffer);
-  console.log(`Conversion done for ${type}`);
-  return uint8;
+  return new Uint8Array(buffer);
 }
 
 async function initPoseLandmarker(runningMode, modelType) {
@@ -94,35 +91,50 @@ async function initPoseLandmarker(runningMode, modelType) {
     );
   }
 
-  console.log("Loading model buffer...");
   const buffer = await loadModel(modelType);
   currentModelType = modelType;
 
-  console.log(`Initializing PoseLandmarker for ${modelType} (runningMode: ${runningMode})`);
   try {
-    console.log("Attempting GPU delegate...");
     poseLandmarker = await PoseLandmarker.createFromOptions(visionInstance, {
-      baseOptions: {
-        modelAssetBuffer: buffer,
-        delegate: "GPU"
-      },
+      baseOptions: { modelAssetBuffer: buffer, delegate: "GPU" },
       runningMode: runningMode,
       numPoses: 1
     });
-    console.log("GPU initialization successful");
   } catch (gpuErr) {
     console.warn("GPU delegate failed, falling back to CPU", gpuErr);
-    console.log("Attempting CPU delegate...");
     poseLandmarker = await PoseLandmarker.createFromOptions(visionInstance, {
-      baseOptions: {
-        modelAssetBuffer: buffer,
-        delegate: "CPU"
-      },
+      baseOptions: { modelAssetBuffer: buffer, delegate: "CPU" },
       runningMode: runningMode,
       numPoses: 1
     });
-    console.log("CPU initialization successful");
   }
+}
+
+// Extract tracked landmarks and compute mean Y from visible ones
+function extractTrackedSignal(results) {
+  if (!results || !results.landmarks || results.landmarks.length === 0) {
+    return { wy: null, points: [], visibleCount: 0 };
+  }
+  const lms = results.landmarks[0];
+  const points = [];
+  let ySum = 0;
+  let visibleCount = 0;
+  for (const idx of TRACK_INDICES) {
+    const lm = lms[idx];
+    if (!lm) {
+      points.push(null);
+      continue;
+    }
+    const vis = lm.visibility ?? 1;
+    const point = { idx, x: lm.x, y: lm.y, visibility: vis };
+    points.push(point);
+    if (vis >= MIN_VISIBILITY) {
+      ySum += lm.y;
+      visibleCount++;
+    }
+  }
+  const wy = visibleCount >= 2 ? ySum / visibleCount : null;
+  return { wy, points, visibleCount };
 }
 
 self.onmessage = async (e) => {
@@ -143,22 +155,21 @@ self.onmessage = async (e) => {
     const { imageBitmap, timestamp, frameId } = payload;
     try {
       const results = poseLandmarker.detectForVideo(imageBitmap, timestamp);
-
-      let wy = null;
-      if (results && results.landmarks && results.landmarks.length > 0) {
-        wy = results.landmarks[0][12].y; // RIGHT_SHOULDER
-      }
-
+      const sig = extractTrackedSignal(results);
       self.postMessage({
         type: "detect_result",
-        payload: { wy, timestamp, frameId }
+        payload: {
+          wy: sig.wy,
+          points: sig.points,
+          visibleCount: sig.visibleCount,
+          timestamp,
+          frameId
+        }
       });
     } catch (err) {
       self.postMessage({ type: "error", message: err.message });
     } finally {
-      if (imageBitmap) {
-        imageBitmap.close();
-      }
+      if (imageBitmap) imageBitmap.close();
     }
   }
 };
