@@ -86,6 +86,7 @@ async function initPoseLandmarker(runningMode, modelType) {
   }
 
   if (!visionInstance) {
+    self.postMessage({ type: "progress", message: "MediaPipe WASMを準備中..." });
     visionInstance = await FilesetResolver.forVisionTasks(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.1/wasm"
     );
@@ -94,6 +95,7 @@ async function initPoseLandmarker(runningMode, modelType) {
   const buffer = await loadModel(modelType);
   currentModelType = modelType;
 
+  self.postMessage({ type: "progress", message: `AIモデル(${modelType})を初期化中(GPU試行)...` });
   try {
     poseLandmarker = await PoseLandmarker.createFromOptions(visionInstance, {
       baseOptions: { modelAssetBuffer: buffer, delegate: "GPU" },
@@ -102,6 +104,7 @@ async function initPoseLandmarker(runningMode, modelType) {
     });
   } catch (gpuErr) {
     console.warn("GPU delegate failed, falling back to CPU", gpuErr);
+    self.postMessage({ type: "progress", message: `AIモデル(${modelType})を初期化中(CPU)...` });
     poseLandmarker = await PoseLandmarker.createFromOptions(visionInstance, {
       baseOptions: { modelAssetBuffer: buffer, delegate: "CPU" },
       runningMode: runningMode,

@@ -1102,6 +1102,17 @@
     let upWorkerFrameResolver = null;
     let upFrameStatus = null; // { wy, timestamp }
 
+    worker.onerror = (e) => {
+      const msg = (e && e.message) ? e.message : "worker.js を読み込めませんでした";
+      console.error("Worker fatal error:", e);
+      const rtText = document.getElementById("rt-loading-text");
+      if (rtText) rtText.textContent = "AIモデルの読み込みに失敗: " + msg;
+      if (workerInitResolver) {
+        const r = workerInitResolver; workerInitResolver = null;
+        r(new Error(msg));
+      }
+    };
+
     worker.onmessage = (e) => {
       const { type, payload, message } = e.data;
       if (type === "progress") {
@@ -1129,14 +1140,23 @@
         }
       } else if (type === "error") {
         console.error("Worker Error:", message);
+        // If init is in flight, surface the error to its awaiter instead of hanging.
+        if (workerInitResolver) {
+          const r = workerInitResolver; workerInitResolver = null;
+          r(new Error(message));
+          return;
+        }
         alert("AIエラー: " + message);
       }
     };
 
     async function initMediaPipe(mode, modelType = "lite") {
       currentModelType = modelType;
-      return new Promise((resolve) => {
-        workerInitResolver = resolve;
+      return new Promise((resolve, reject) => {
+        workerInitResolver = (errOrUndef) => {
+          if (errOrUndef instanceof Error) reject(errOrUndef);
+          else resolve();
+        };
         worker.postMessage({ type: "init", payload: { mode, modelType } });
       });
     }
