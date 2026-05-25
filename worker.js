@@ -62,8 +62,13 @@ async function loadModel(type) {
   let buffer = await getCachedModel(type);
   if (!buffer) {
     self.postMessage({ type: "progress", message: `AIモデル(${type})をダウンロード中...` });
-    const res = await fetch(MODEL_URLS[type]);
-    if (!res.ok) throw new Error("モデルのダウンロードに失敗しました");
+    let res;
+    try {
+      res = await fetch(MODEL_URLS[type], { mode: "cors", credentials: "omit", redirect: "follow" });
+    } catch (e) {
+      throw new Error(`モデル取得失敗(${type}): ${e.message || e}`);
+    }
+    if (!res.ok) throw new Error(`モデル取得失敗(${type}): HTTP ${res.status}`);
     buffer = await res.arrayBuffer();
     await cacheModel(type, buffer);
   } else {
@@ -87,9 +92,13 @@ async function initPoseLandmarker(runningMode, modelType) {
 
   if (!visionInstance) {
     self.postMessage({ type: "progress", message: "MediaPipe WASMを準備中..." });
-    visionInstance = await FilesetResolver.forVisionTasks(
-      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.1/wasm"
-    );
+    try {
+      visionInstance = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.1/wasm"
+      );
+    } catch (e) {
+      throw new Error(`WASM準備失敗(jsdelivr): ${e.message || e}`);
+    }
   }
 
   const buffer = await loadModel(modelType);
