@@ -1099,10 +1099,55 @@
     // Worker initialization
     // Cache-buster: iPhone Safari aggressively caches worker.js and ignores
     // normal reloads. Bump this string when worker.js changes meaningfully.
-    const worker = new Worker("worker.js?v=20260526a");
+    const worker = new Worker("worker.js?v=20260526b");
     let workerInitResolver = null;
     let upWorkerFrameResolver = null;
     let upFrameStatus = null; // { wy, timestamp }
+
+    // MediaPipe library is fetched by the page (CORS works) and handed to
+    // the worker as a blob URL so importScripts loads it as same-origin.
+    // iOS Safari refuses cross-origin importScripts even when CORP headers
+    // are set, so this two-step load is required.
+    const MP_VERSION = "0.10.9";
+    const MP_BUNDLE_URLS = [
+      `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}/vision_bundle.js`,
+      `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/vision_bundle.js`
+    ];
+    let mpLoadPromise = null;
+
+    async function loadMediaPipeIntoWorker() {
+      if (mpLoadPromise) return mpLoadPromise;
+      mpLoadPromise = (async () => {
+        const rtText = document.getElementById("rt-loading-text");
+        if (rtText) rtText.textContent = "MediaPipeライブラリを取得中...";
+        let scriptText = null, lastErr = null;
+        for (const url of MP_BUNDLE_URLS) {
+          try {
+            const r = await fetch(url, { mode: "cors", credentials: "omit" });
+            if (!r.ok) { lastErr = new Error(`HTTP ${r.status} @ ${url}`); continue; }
+            scriptText = await r.text();
+            break;
+          } catch (e) { lastErr = e; }
+        }
+        if (!scriptText) throw new Error("MediaPipeライブラリ取得失敗: " + (lastErr && lastErr.message || lastErr));
+        const blob = new Blob([scriptText], { type: "application/javascript" });
+        const blobUrl = URL.createObjectURL(blob);
+        await new Promise((resolve, reject) => {
+          const onceHandler = (e) => {
+            if (e.data.type === "mp_loaded") {
+              worker.removeEventListener("message", onceHandler);
+              resolve();
+            } else if (e.data.type === "error" && e.data.message && e.data.message.startsWith("MP読み込み失敗")) {
+              worker.removeEventListener("message", onceHandler);
+              reject(new Error(e.data.message));
+            }
+          };
+          worker.addEventListener("message", onceHandler);
+          worker.postMessage({ type: "load_mp", payload: { blobUrl } });
+        });
+      })();
+      return mpLoadPromise;
+    }
 
     worker.onerror = (e) => {
       const msg = (e && e.message) ? e.message : "worker.js を読み込めませんでした";
@@ -1154,6 +1199,7 @@
 
     async function initMediaPipe(mode, modelType = "lite") {
       currentModelType = modelType;
+      await loadMediaPipeIntoWorker();
       return new Promise((resolve, reject) => {
         workerInitResolver = (errOrUndef) => {
           if (errOrUndef instanceof Error) reject(errOrUndef);
