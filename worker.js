@@ -1,26 +1,23 @@
-// MediaPipe tasks-vision (classic worker). iPhone Safari is picky about
-// cross-origin importScripts CORP headers; unpkg.com serves with
-// Access-Control-Allow-Origin: * and Cross-Origin-Resource-Policy:
-// cross-origin reliably, while jsdelivr has been observed to fail
-// importScripts on recent iOS Safari builds.
+// Classic worker for MediaPipe pose detection.
+//
+// iPhone Safari blocks cross-origin importScripts for both unpkg and
+// jsdelivr CDNs. To work around this, the main thread fetches
+// vision_bundle.js via fetch() (CORS works fine in the page context),
+// wraps the source in a Blob URL, and posts that URL to this worker.
+// importScripts on a blob URL is treated as same-origin, so it loads.
+//
+// Until the main thread sends "load_mp", FilesetResolver/PoseLandmarker
+// are unavailable and only "load_mp" messages are honored.
+
+let mpLoaded = false;
+let FilesetResolver = null;
+let PoseLandmarker = null;
+
 const MP_VERSION = "0.10.9";
-const MP_BUNDLE = `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}/vision_bundle.js`;
-const MP_WASM = `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}/wasm`;
-
-try {
-  importScripts(MP_BUNDLE);
-} catch (e) {
-  // Fallback to jsdelivr if unpkg is blocked
-  importScripts(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/vision_bundle.js`);
-}
-
-console.log("Worker Globals:", Object.keys(self).filter(k => !k.startsWith("webkit") && !k.startsWith("moz")));
-
-const FilesetResolver = self.FilesetResolver || (self.vision && self.vision.FilesetResolver);
-const PoseLandmarker = self.PoseLandmarker || (self.vision && self.vision.PoseLandmarker);
-
-console.log("Detected FilesetResolver:", !!FilesetResolver);
-console.log("Detected PoseLandmarker:", !!PoseLandmarker);
+const MP_WASM_URLS = [
+  `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}/wasm`,
+  `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/wasm`
+];
 
 let poseLandmarker = null;
 let currentModelType = null;
@@ -91,6 +88,18 @@ async function loadModel(type) {
   return new Uint8Array(buffer);
 }
 
+async function loadVisionInstance() {
+  let lastErr;
+  for (const url of MP_WASM_URLS) {
+    try {
+      return await FilesetResolver.forVisionTasks(url);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw new Error(`WASM準備失敗: ${lastErr && lastErr.message || lastErr}`);
+}
+
 async function initPoseLandmarker(runningMode, modelType) {
   const needNewModel = !poseLandmarker || currentModelType !== modelType;
 
@@ -106,18 +115,7 @@ async function initPoseLandmarker(runningMode, modelType) {
 
   if (!visionInstance) {
     self.postMessage({ type: "progress", message: "MediaPipe WASMを準備中..." });
-    try {
-      visionInstance = await FilesetResolver.forVisionTasks(MP_WASM);
-    } catch (e) {
-      // Fallback to jsdelivr WASM
-      try {
-        visionInstance = await FilesetResolver.forVisionTasks(
-          `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/wasm`
-        );
-      } catch (e2) {
-        throw new Error(`WASM準備失敗: ${e2.message || e2}`);
-      }
-    }
+    visionInstance = await loadVisionInstance();
   }
 
   const buffer = await loadModel(modelType);
@@ -141,7 +139,6 @@ async function initPoseLandmarker(runningMode, modelType) {
   }
 }
 
-// Extract tracked landmarks and compute mean Y from visible ones
 function extractTrackedSignal(results) {
   if (!results || !results.landmarks || results.landmarks.length === 0) {
     return { wy: null, points: [], visibleCount: 0 };
@@ -170,6 +167,27 @@ function extractTrackedSignal(results) {
 
 self.onmessage = async (e) => {
   const { type, payload } = e.data;
+
+  if (type === "load_mp") {
+    try {
+      importScripts(payload.blobUrl);
+      FilesetResolver = self.FilesetResolver || (self.vision && self.vision.FilesetResolver);
+      PoseLandmarker = self.PoseLandmarker || (self.vision && self.vision.PoseLandmarker);
+      if (!FilesetResolver || !PoseLandmarker) {
+        throw new Error("MediaPipeのグローバルが見つかりません");
+      }
+      mpLoaded = true;
+      self.postMessage({ type: "mp_loaded" });
+    } catch (err) {
+      self.postMessage({ type: "error", message: "MP読み込み失敗: " + (err.message || err) });
+    }
+    return;
+  }
+
+  if (!mpLoaded) {
+    self.postMessage({ type: "error", message: "MediaPipeが未読み込みです" });
+    return;
+  }
 
   if (type === "init") {
     try {
