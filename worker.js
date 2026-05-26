@@ -13,7 +13,7 @@ let mpLoaded = false;
 let FilesetResolver = null;
 let PoseLandmarker = null;
 
-const MP_VERSION = "0.10.9";
+const MP_VERSION = "0.10.1";
 const MP_WASM_URLS = [
   `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}/wasm`,
   `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/wasm`

@@ -1099,7 +1099,7 @@
     // Worker initialization
     // Cache-buster: iPhone Safari aggressively caches worker.js and ignores
     // normal reloads. Bump this string when worker.js changes meaningfully.
-    const worker = new Worker("worker.js?v=20260526b");
+    const worker = new Worker("worker.js?v=20260526c");
     let workerInitResolver = null;
     let upWorkerFrameResolver = null;
     let upFrameStatus = null; // { wy, timestamp }
@@ -1108,7 +1108,7 @@
     // the worker as a blob URL so importScripts loads it as same-origin.
     // iOS Safari refuses cross-origin importScripts even when CORP headers
     // are set, so this two-step load is required.
-    const MP_VERSION = "0.10.9";
+    const MP_VERSION = "0.10.1";
     const MP_BUNDLE_URLS = [
       `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}/vision_bundle.js`,
       `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/vision_bundle.js`
