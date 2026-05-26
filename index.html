@@ -928,7 +928,7 @@
         </div>
 
         <div class="video-wrapper" id="up-video-wrapper" style="display:none;">
-          <video id="upload-video" playsinline muted></video>
+          <video id="upload-video" playsinline muted controls preload="metadata"></video>
           <div class="video-overlay">
             <div class="status-badge idle" id="up-status-badge">
               <span class="dot"></span>
@@ -1099,7 +1099,7 @@
     // Worker initialization
     // Cache-buster: iPhone Safari aggressively caches worker.js and ignores
     // normal reloads. Bump this string when worker.js changes meaningfully.
-    const worker = new Worker("worker.js?v=20260526g");
+    const worker = new Worker("worker.js?v=20260526h");
     let workerInitResolver = null;
     let upWorkerFrameResolver = null;
     let upFrameStatus = null; // { wy, timestamp }
@@ -1690,14 +1690,47 @@
 
     function loadVideo(file) {
       const url = URL.createObjectURL(file);
+      uploadVideo.removeAttribute("src");
+      uploadVideo.load();
       uploadVideo.src = url;
       uploadVideo.load();
       upVideoWrapper.style.display = "";
       uploadArea.style.display = "none";
-      upBtnAnalyze.disabled = false;
-      // Reset results
+      upBtnAnalyze.disabled = true;
       upStats.style.display = "none";
       upLogSection.style.display = "none";
+
+      // iOS Safari does not paint the first frame of a <video> without a
+      // user gesture, so the element stays black after selection even
+      // though the file has loaded. Force a paint by seeking to the start
+      // once metadata is available, and surface errors / state in the UI.
+      const progressWrap = document.getElementById("up-progress");
+      const label = document.getElementById("up-progress-label");
+      const pct = document.getElementById("up-progress-pct");
+      progressWrap.classList.add("active");
+      if (pct) pct.textContent = "";
+      if (label) label.textContent = `動画を読み込み中… (${(file.size/1048576).toFixed(1)}MB ${file.type||"unknown"})`;
+
+      const onMeta = () => {
+        uploadVideo.removeEventListener("loadedmetadata", onMeta);
+        const d = uploadVideo.duration;
+        const dText = isFinite(d) ? `${d.toFixed(1)}秒` : "長さ不明(ストリーミング録画?)";
+        if (label) label.textContent = `動画準備完了: ${dText} ${uploadVideo.videoWidth}x${uploadVideo.videoHeight}`;
+        // Nudge a frame to render on iOS
+        try { uploadVideo.currentTime = 0.05; } catch (_) {}
+        upBtnAnalyze.disabled = false;
+      };
+      const onErr = () => {
+        uploadVideo.removeEventListener("error", onErr);
+        const err = uploadVideo.error;
+        const code = err ? err.code : "?";
+        const codeMap = { 1: "中断", 2: "ネットワーク", 3: "デコード失敗", 4: "形式非対応" };
+        const msg = `動画読み込み失敗: ${codeMap[code] || "不明"}(code ${code}). iOS Safariは H.264/AAC のMP4のみ確実に再生できます。`;
+        if (label) label.textContent = msg;
+        upBtnAnalyze.disabled = true;
+      };
+      uploadVideo.addEventListener("loadedmetadata", onMeta);
+      uploadVideo.addEventListener("error", onErr);
     }
 
     // ========== Model Selector ==========
