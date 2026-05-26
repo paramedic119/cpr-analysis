@@ -10,8 +10,14 @@
 // are unavailable and only "load_mp" messages are honored.
 
 let mpLoaded = false;
-let FilesetResolver = null;
-let PoseLandmarker = null;
+// NOTE: do NOT declare FilesetResolver/PoseLandmarker here. The MediaPipe
+// bundle, once stripped of its trailing ESM export and importScripts'd,
+// declares its own top-level `class FilesetResolver` / `const PoseLandmarker`.
+// Any local `let`/`const` of the same name would throw
+// "Identifier already declared" inside importScripts. We read them off
+// `self.vision` / global scope below after loading.
+let MpFilesetResolver = null;
+let MpPoseLandmarker = null;
 
 const MP_VERSION = "0.10.1";
 const MP_WASM_URLS = [
@@ -92,7 +98,7 @@ async function loadVisionInstance() {
   let lastErr;
   for (const url of MP_WASM_URLS) {
     try {
-      return await FilesetResolver.forVisionTasks(url);
+      return await MpFilesetResolver.forVisionTasks(url);
     } catch (e) {
       lastErr = e;
     }
@@ -123,7 +129,7 @@ async function initPoseLandmarker(runningMode, modelType) {
 
   self.postMessage({ type: "progress", message: `AIモデル(${modelType})を初期化中(GPU試行)...` });
   try {
-    poseLandmarker = await PoseLandmarker.createFromOptions(visionInstance, {
+    poseLandmarker = await MpPoseLandmarker.createFromOptions(visionInstance, {
       baseOptions: { modelAssetBuffer: buffer, delegate: "GPU" },
       runningMode: runningMode,
       numPoses: 1
@@ -131,7 +137,7 @@ async function initPoseLandmarker(runningMode, modelType) {
   } catch (gpuErr) {
     console.warn("GPU delegate failed, falling back to CPU", gpuErr);
     self.postMessage({ type: "progress", message: `AIモデル(${modelType})を初期化中(CPU)...` });
-    poseLandmarker = await PoseLandmarker.createFromOptions(visionInstance, {
+    poseLandmarker = await MpPoseLandmarker.createFromOptions(visionInstance, {
       baseOptions: { modelAssetBuffer: buffer, delegate: "CPU" },
       runningMode: runningMode,
       numPoses: 1
@@ -171,9 +177,11 @@ self.onmessage = async (e) => {
   if (type === "load_mp") {
     try {
       importScripts(payload.blobUrl);
-      FilesetResolver = self.FilesetResolver || (self.vision && self.vision.FilesetResolver);
-      PoseLandmarker = self.PoseLandmarker || (self.vision && self.vision.PoseLandmarker);
-      if (!FilesetResolver || !PoseLandmarker) {
+      // Bundle either sets globals directly or assigns onto `self.vision`.
+      const visionGlobal = self.vision || {};
+      MpFilesetResolver = self.FilesetResolver || visionGlobal.FilesetResolver;
+      MpPoseLandmarker = self.PoseLandmarker || visionGlobal.PoseLandmarker;
+      if (!MpFilesetResolver || !MpPoseLandmarker) {
         throw new Error("MediaPipeのグローバルが見つかりません");
       }
       mpLoaded = true;
