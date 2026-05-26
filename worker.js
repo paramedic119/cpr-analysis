@@ -75,8 +75,14 @@ async function cacheModel(type, buffer) {
   });
 }
 
+const MODEL_CACHE_VERSION = 2;
+const MODEL_MIN_BYTES = 1_000_000; // valid pose landmarker models are 5+ MB
+
 async function loadModel(type) {
-  let buffer = await getCachedModel(type);
+  const cacheKey = `${type}_v${MODEL_CACHE_VERSION}`;
+  let buffer = await getCachedModel(cacheKey);
+  // Reject obviously truncated/corrupted cache entries
+  if (buffer && buffer.byteLength < MODEL_MIN_BYTES) buffer = null;
   if (!buffer) {
     self.postMessage({ type: "progress", message: `AIモデル(${type})をダウンロード中...` });
     let res;
@@ -87,11 +93,24 @@ async function loadModel(type) {
     }
     if (!res.ok) throw new Error(`モデル取得失敗(${type}): HTTP ${res.status}`);
     buffer = await res.arrayBuffer();
-    await cacheModel(type, buffer);
+    if (buffer.byteLength < MODEL_MIN_BYTES) {
+      throw new Error(`モデル取得失敗(${type}): サイズ異常 ${buffer.byteLength} bytes`);
+    }
+    await cacheModel(cacheKey, buffer);
   } else {
     self.postMessage({ type: "progress", message: `AIモデル(${type})をローカルから展開中...` });
   }
   return new Uint8Array(buffer);
+}
+
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} がタイムアウト(${ms}ms)`)), ms);
+    promise.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); }
+    );
+  });
 }
 
 async function loadVisionInstance() {
@@ -129,19 +148,27 @@ async function initPoseLandmarker(runningMode, modelType) {
 
   self.postMessage({ type: "progress", message: `AIモデル(${modelType})を初期化中(GPU試行)...` });
   try {
-    poseLandmarker = await MpPoseLandmarker.createFromOptions(visionInstance, {
-      baseOptions: { modelAssetBuffer: buffer, delegate: "GPU" },
-      runningMode: runningMode,
-      numPoses: 1
-    });
+    poseLandmarker = await withTimeout(
+      MpPoseLandmarker.createFromOptions(visionInstance, {
+        baseOptions: { modelAssetBuffer: buffer, delegate: "GPU" },
+        runningMode: runningMode,
+        numPoses: 1
+      }),
+      15000,
+      "GPU初期化"
+    );
   } catch (gpuErr) {
     console.warn("GPU delegate failed, falling back to CPU", gpuErr);
     self.postMessage({ type: "progress", message: `AIモデル(${modelType})を初期化中(CPU)...` });
-    poseLandmarker = await MpPoseLandmarker.createFromOptions(visionInstance, {
-      baseOptions: { modelAssetBuffer: buffer, delegate: "CPU" },
-      runningMode: runningMode,
-      numPoses: 1
-    });
+    poseLandmarker = await withTimeout(
+      MpPoseLandmarker.createFromOptions(visionInstance, {
+        baseOptions: { modelAssetBuffer: buffer, delegate: "CPU" },
+        runningMode: runningMode,
+        numPoses: 1
+      }),
+      30000,
+      "CPU初期化"
+    );
   }
 }
 
