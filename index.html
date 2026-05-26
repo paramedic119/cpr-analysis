@@ -1097,7 +1097,9 @@
     const TRACK_INDEX = 12; // RIGHT_SHOULDER
 
     // Worker initialization
-    const worker = new Worker("worker.js");
+    // Cache-buster: iPhone Safari aggressively caches worker.js and ignores
+    // normal reloads. Bump this string when worker.js changes meaningfully.
+    const worker = new Worker("worker.js?v=20260526a");
     let workerInitResolver = null;
     let upWorkerFrameResolver = null;
     let upFrameStatus = null; // { wy, timestamp }
