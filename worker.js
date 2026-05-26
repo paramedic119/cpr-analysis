@@ -1,4 +1,18 @@
-importScripts("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.1/vision_bundle.js");
+// MediaPipe tasks-vision (classic worker). iPhone Safari is picky about
+// cross-origin importScripts CORP headers; unpkg.com serves with
+// Access-Control-Allow-Origin: * and Cross-Origin-Resource-Policy:
+// cross-origin reliably, while jsdelivr has been observed to fail
+// importScripts on recent iOS Safari builds.
+const MP_VERSION = "0.10.9";
+const MP_BUNDLE = `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}/vision_bundle.js`;
+const MP_WASM = `https://unpkg.com/@mediapipe/tasks-vision@${MP_VERSION}/wasm`;
+
+try {
+  importScripts(MP_BUNDLE);
+} catch (e) {
+  // Fallback to jsdelivr if unpkg is blocked
+  importScripts(`https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/vision_bundle.js`);
+}
 
 console.log("Worker Globals:", Object.keys(self).filter(k => !k.startsWith("webkit") && !k.startsWith("moz")));
 
@@ -93,11 +107,16 @@ async function initPoseLandmarker(runningMode, modelType) {
   if (!visionInstance) {
     self.postMessage({ type: "progress", message: "MediaPipe WASMを準備中..." });
     try {
-      visionInstance = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.1/wasm"
-      );
+      visionInstance = await FilesetResolver.forVisionTasks(MP_WASM);
     } catch (e) {
-      throw new Error(`WASM準備失敗(jsdelivr): ${e.message || e}`);
+      // Fallback to jsdelivr WASM
+      try {
+        visionInstance = await FilesetResolver.forVisionTasks(
+          `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/wasm`
+        );
+      } catch (e2) {
+        throw new Error(`WASM準備失敗: ${e2.message || e2}`);
+      }
     }
   }
 
