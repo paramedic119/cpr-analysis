@@ -1099,7 +1099,7 @@
     // Worker initialization
     // Cache-buster: iPhone Safari aggressively caches worker.js and ignores
     // normal reloads. Bump this string when worker.js changes meaningfully.
-    const worker = new Worker("worker.js?v=20260526d");
+    const worker = new Worker("worker.js?v=20260526e");
     let workerInitResolver = null;
     let upWorkerFrameResolver = null;
     let upFrameStatus = null; // { wy, timestamp }
@@ -1108,10 +1108,13 @@
     // the worker as a blob URL so importScripts loads it as same-origin.
     // iOS Safari refuses cross-origin importScripts even when CORP headers
     // are set, so this two-step load is required.
-    // jsdelivr serves the raw classic-script vision_bundle.js. unpkg has
-    // been observed to return an ESM build for the same path which then
-    // throws "Unexpected token 'export'" in importScripts — so jsdelivr
-    // is tried first and any ESM-looking response is rejected.
+    //
+    // @mediapipe/tasks-vision@0.10.1/vision_bundle.js is mostly classic
+    // UMD (var/assignments populating a global `vision = {}` object), but
+    // the npm tarball appends `;export{...};` for ESM consumers. The
+    // classic-script parser used by importScripts rejects that token, so
+    // we strip it before forming the blob. Everything before the export
+    // is already plain ES5 script and runs fine.
     const MP_VERSION = "0.10.1";
     const MP_BUNDLE_URLS = [
       `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSION}/vision_bundle.js`,
@@ -1119,9 +1122,10 @@
     ];
     let mpLoadPromise = null;
 
-    function looksLikeESM(text) {
-      const head = text.slice(0, 4000);
-      return /(^|\n|;)\s*(export|import)\s/.test(head);
+    function stripEsmExport(text) {
+      // Remove `;export{...};` (and any leading whitespace) from the tail
+      // of the bundle. Match top-level only (after `;` or newline).
+      return text.replace(/([\n;])\s*export\s*\{[^}]*\}\s*;?/g, '$1');
     }
 
     async function loadMediaPipeIntoWorker() {
@@ -1134,12 +1138,7 @@
           try {
             const r = await fetch(url, { mode: "cors", credentials: "omit" });
             if (!r.ok) { lastErr = new Error(`HTTP ${r.status} @ ${url}`); continue; }
-            const text = await r.text();
-            if (looksLikeESM(text)) {
-              lastErr = new Error(`ESM形式で使用不可 @ ${url}`);
-              continue;
-            }
-            scriptText = text;
+            scriptText = stripEsmExport(await r.text());
             break;
           } catch (e) { lastErr = e; }
         }
